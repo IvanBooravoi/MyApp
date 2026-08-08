@@ -1,0 +1,78 @@
+          ]
+        },
+        "Microsoft.AspNetCore.OpenApi/10.0.10": {
+          "type": "package",
+          "dependencies": {
+>           "Microsoft.OpenApi": "2.0.0"
+          },
+          "compile": {
+            "lib/net10.0/Microsoft.AspNetCore.OpenApi.dll": {
+              "related": ".xml"
+            }
+            "lib/net9.0/Microsoft.IdentityModel.Tokens.dll": {
+              "related": ".xml"
+            }
+          }
+        },
+>       "Microsoft.OpenApi/3.9.0": {
+          "type": "package",
+          "compile": {
+>           "lib/net8.0/Microsoft.OpenApi.dll": {
+              "related": ".pdb;.xml"
+            }
+          },
+          "runtime": {
+>           "lib/net8.0/Microsoft.OpenApi.dll": {
+              "related": ".pdb;.xml"
+            }
+          }
+        },
+        "Npgsql/10.0.3": {
+          "lib/netstandard2.0/Microsoft.IdentityModel.Tokens.xml",
+          "microsoft.identitymodel.tokens.8.0.1.nupkg.sha512",
+          "microsoft.identitymodel.tokens.nuspec"
+        ]
+      },
+>     "Microsoft.OpenApi/3.9.0": {
+        "sha512": "2sDK6AFY1L/Xg8JvwlaDoPwzGqCftjUgHG2NhCy8gNV/1v4eXziYoH39e/pwC7oTBJInuYUUJqfkRpIMPQ/Fyw==",
+        "type": "package",
+>       "path": "microsoft.openapi/3.9.0",
+        "files": [
+          ".nupkg.metadata",
+          ".signature.p7s",
+          "README.md",
+>         "lib/net8.0/Microsoft.OpenApi.dll",
+>         "lib/net8.0/Microsoft.OpenApi.pdb",
+>         "lib/net8.0/Microsoft.OpenApi.xml",
+>         "lib/netstandard2.0/Microsoft.OpenApi.dll",
+>         "lib/netstandard2.0/Microsoft.OpenApi.pdb",
+>         "lib/netstandard2.0/Microsoft.OpenApi.xml",
+>         "microsoft.openapi.3.9.0.nupkg.sha512",
+>         "microsoft.openapi.nuspec"
+        ]
+      },
+      "Npgsql/10.0.3": {
+        "sha512": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "type": "package",
+    "projectFileDependencyGroups": {
+      "net10.0": [
+        "FluentValidation.AspNetCore >= 11.3.1",
+        "Microsoft.AspNetCore.Authentication.JwtBearer >= 10.0.4",
+        "Microsoft.AspNetCore.OpenApi >= 10.0.10",
+>       "Microsoft.OpenApi >= 3.9.0",
+        "MyApp.Application >= 1.0.0",
+        "MyApp.Infrastructure >= 1.0.0"
+      ]
+    },
+    "packageFolders": {
+            },
+            "Microsoft.AspNetCore.OpenApi": {
+              "target": "Package",
+              "version": "[10.0.10, )"
+            },
+>           "Microsoft.OpenApi": {
+              "target": "Package",
+              "version": "[3.9.0, )"
+            }
+          },
+          "imports": [
