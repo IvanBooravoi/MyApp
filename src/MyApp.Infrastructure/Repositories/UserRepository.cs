@@ -1,27 +1,48 @@
-using MyApp.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Threading.Tasks;
+using MyApp.Application.Abstractions;
+using MyApp.Domain.Entities;
+using MyApp.Infrastructure.Db;
 
-namespace MyApp.Infrastructure.Repositories {
-    public interface IUserRepository {
-        Task<User?> GetByEmailAsync(string email);
-        Task<User?> GetByUserNameAsync(string userName);
-        Task AddAsync(User user);
-    }
+namespace MyApp.Infrastructure.Repositories;
 
-    public class UserRepository : IUserRepository {
-        private readonly Db.AppDbContext _ctx;
-        public UserRepository(Db.AppDbContext ctx) => _ctx = ctx;
+public sealed class UserRepository(AppDbContext db) : IUserRepository
+{
+    public Task<User?> FindByLoginAsync(
+        string login,
+        CancellationToken cancellationToken) =>
+        db.Users.FirstOrDefaultAsync(
+            user => user.UserName == login || user.Email == login,
+            cancellationToken);
 
-        public Task<User?> GetByEmailAsync(string email) =>
-            _ctx.Users.FirstOrDefaultAsync(x => x.Email == email);
+    public async Task<IReadOnlyList<User>> GetAllAsync(
+        CancellationToken cancellationToken) =>
+        await db.Users
+            .AsNoTracking()
+            .Include(user => user.Profession)
+            .OrderBy(user => user.LastName)
+            .ThenBy(user => user.FirstName)
+            .ToArrayAsync(cancellationToken);
 
-        public Task<User?> GetByUserNameAsync(string userName) =>
-            _ctx.Users.FirstOrDefaultAsync(x => x.UserName == userName);
+    public Task<User?> FindByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken) =>
+        db.Users.FindAsync([id], cancellationToken).AsTask();
 
-        public async Task AddAsync(User user)
-        {
-            await _ctx.Users.AddAsync(user);
-        }
-    }
+    public Task<bool> UserNameExistsAsync(
+        string userName,
+        Guid? excludingId,
+        CancellationToken cancellationToken) =>
+        db.Users.AnyAsync(
+            user =>
+                (!excludingId.HasValue || user.Id != excludingId.Value) &&
+                user.UserName.ToLower() == userName.ToLower(),
+            cancellationToken);
+
+    public async Task AddAsync(
+        User user,
+        CancellationToken cancellationToken) =>
+        await db.Users.AddAsync(user, cancellationToken);
+
+    public async Task SaveChangesAsync(CancellationToken cancellationToken) =>
+        await db.SaveChangesAsync(cancellationToken);
 }
