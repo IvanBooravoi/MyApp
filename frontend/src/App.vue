@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import AuthLogin from './components/AuthLogin.vue'
 import HomeView from './components/HomeView.vue'
 import NavigationSidebar from './components/NavigationSidebar.vue'
+import SelectedComponentsView from './components/SelectedComponentsView.vue'
 import SettingsView from './components/SettingsView.vue'
 import TablesView from './components/TablesView.vue'
 
@@ -21,6 +22,7 @@ const isNavigationCollapsed = ref(false)
 const currentPage = ref('home')
 const currentTable = ref('v_full_ost')
 const currentSettings = ref('users')
+const selectedMehRows = ref([])
 
 function handleAuthenticated(authData) {
   localStorage.setItem(TOKEN_KEY, authData.token)
@@ -36,6 +38,7 @@ function handleLogout() {
   role.value = null
   isNavigationCollapsed.value = false
   currentPage.value = 'home'
+  selectedMehRows.value = []
 }
 
 function openTable(tableName) {
@@ -46,6 +49,10 @@ function openTable(tableName) {
 function openSettings(section) {
   currentSettings.value = section
   currentPage.value = 'settings'
+}
+
+function openSelectedComponents() {
+  currentPage.value = 'selected-components'
 }
 </script>
 
@@ -59,9 +66,11 @@ function openSettings(section) {
       :active-table="currentTable"
       :active-settings="currentSettings"
       :is-admin="role === 'administrator'"
+      :selected-components-count="selectedMehRows.length"
       @toggle="isNavigationCollapsed = !isNavigationCollapsed"
       @navigate="currentPage = $event"
       @navigate-table="openTable"
+      @navigate-selected-components="openSelectedComponents"
       @navigate-settings="openSettings"
       @logout="handleLogout"
     />
@@ -73,8 +82,19 @@ function openSettings(section) {
       v-else-if="currentPage === 'tables'"
       :navigation-collapsed="isNavigationCollapsed"
       :selected-table-id="currentTable"
+      :selected-meh-rows="selectedMehRows"
       :token="token"
       @select-table="currentTable = $event"
+      @show-selected-components="openSelectedComponents"
+      @update:selected-meh-rows="selectedMehRows = $event"
+    />
+    <SelectedComponentsView
+      v-else-if="currentPage === 'selected-components'"
+      :navigation-collapsed="isNavigationCollapsed"
+      :rows="selectedMehRows"
+      @back="openTable('v_meh_ost')"
+      @clear="selectedMehRows = []"
+      @update:rows="selectedMehRows = $event"
     />
     <SettingsView
       v-else-if="currentPage === 'settings' && role === 'administrator'"

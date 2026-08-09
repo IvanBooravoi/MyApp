@@ -14,7 +14,13 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  selectedMehRows: {
+    type: Array,
+    required: true,
+  },
 })
+
+const emit = defineEmits(['show-selected-components', 'update:selected-meh-rows'])
 
 const tables = [
   { id: 'v_full_ost', name: 'Остатки на складе' },
@@ -51,6 +57,15 @@ const totalPages = computed(() => {
 })
 
 const isWorkersTable = computed(() => props.selectedTableId === 'v_workers')
+const isSelectableTable = computed(() => props.selectedTableId === 'v_meh_ost')
+const selectedRowKeys = computed(
+  () => new Set(props.selectedMehRows.map((row) => getRowKey(row))),
+)
+const areAllVisibleRowsSelected = computed(
+  () =>
+    rows.value.length > 0 &&
+    rows.value.every((row) => selectedRowKeys.value.has(getRowKey(row))),
+)
 const hasActiveFilter = computed(
   () =>
     Boolean(searchQuery.value.trim()) ||
@@ -71,6 +86,75 @@ function formatCell(value) {
   }
 
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function getRowKey(row) {
+  return JSON.stringify(
+    Object.keys(row)
+      .filter((key) => key !== '__quantity')
+      .sort()
+      .map((key) => [key, row[key]]),
+  )
+}
+
+function getSelectedRow(row) {
+  const key = getRowKey(row)
+  return props.selectedMehRows.find((selectedRow) => getRowKey(selectedRow) === key)
+}
+
+function getQuantity(row) {
+  return getSelectedRow(row)?.__quantity ?? 1
+}
+
+function isRowSelected(row) {
+  return selectedRowKeys.value.has(getRowKey(row))
+}
+
+function toggleRow(row) {
+  const key = getRowKey(row)
+  const nextRows = isRowSelected(row)
+    ? props.selectedMehRows.filter((selectedRow) => getRowKey(selectedRow) !== key)
+    : [...props.selectedMehRows, { ...row, __quantity: 1 }]
+  emit('update:selected-meh-rows', nextRows)
+}
+
+function updateQuantity(row, value) {
+  const parsedValue = Number(String(value).replace(',', '.'))
+  const quantity = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 1
+  const key = getRowKey(row)
+  const nextRows = props.selectedMehRows.map((selectedRow) =>
+    getRowKey(selectedRow) === key
+      ? { ...selectedRow, __quantity: quantity }
+      : selectedRow,
+  )
+
+  if (!isRowSelected(row)) {
+    nextRows.push({ ...row, __quantity: quantity })
+  }
+
+  emit('update:selected-meh-rows', nextRows)
+}
+
+function toggleVisibleRows() {
+  const visibleKeys = new Set(rows.value.map((row) => getRowKey(row)))
+  if (areAllVisibleRowsSelected.value) {
+    emit(
+      'update:selected-meh-rows',
+      props.selectedMehRows.filter((row) => !visibleKeys.has(getRowKey(row))),
+    )
+    return
+  }
+
+  const nextRows = [...props.selectedMehRows]
+  const existingKeys = new Set(selectedRowKeys.value)
+  rows.value.forEach((row) => {
+    const key = getRowKey(row)
+    if (!existingKeys.has(key)) {
+      nextRows.push({ ...row, __quantity: 1 })
+      existingKeys.add(key)
+    }
+  })
+  emit('update:selected-meh-rows', nextRows)
 }
 
 async function loadTable() {
@@ -227,6 +311,18 @@ watch(
             <span v-else class="worker-filter-hint">Фильтры применяются без учёта регистра</span>
           </label>
 
+          <div v-if="isSelectableTable" class="selection-actions">
+            <span>Выбрано: {{ selectedMehRows.length }}</span>
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="selectedMehRows.length === 0"
+              @click="$emit('show-selected-components')"
+            >
+              Показать выбранные
+            </button>
+          </div>
+
           <label class="page-size-select">
             <span>Показывать</span>
             <select v-model="pageSize" :disabled="isLoading" @change="changePageSize">
@@ -247,17 +343,50 @@ watch(
           <table v-if="columns.length">
             <thead>
               <tr>
+                <th v-if="isSelectableTable" class="selection-column">
+                  <input
+                    type="checkbox"
+                    :checked="areAllVisibleRowsSelected"
+                    :disabled="rows.length === 0"
+                    aria-label="Выбрать все строки на текущей странице"
+                    @change="toggleVisibleRows"
+                  />
+                </th>
                 <th v-for="column in columns" :key="column">
                   {{ columnLabels[column] ?? column }}
                 </th>
+                <th v-if="isSelectableTable" class="quantity-column">Количество</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, rowIndex) in rows" :key="rowIndex">
+              <tr
+                v-for="(row, rowIndex) in rows"
+                :key="`${getRowKey(row)}-${rowIndex}`"
+                :class="{ 'data-row--selected': isSelectableTable && isRowSelected(row) }"
+              >
+                <td v-if="isSelectableTable" class="selection-column">
+                  <input
+                    type="checkbox"
+                    :checked="isRowSelected(row)"
+                    aria-label="Выбрать компонент"
+                    @change="toggleRow(row)"
+                  />
+                </td>
                 <td v-for="column in columns" :key="column">{{ formatCell(row[column]) }}</td>
+                <td v-if="isSelectableTable" class="quantity-column">
+                  <input
+                    class="quantity-input"
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    :value="getQuantity(row)"
+                    aria-label="Количество компонента"
+                    @change="updateQuantity(row, $event.target.value)"
+                  />
+                </td>
               </tr>
               <tr v-if="rows.length === 0">
-                <td class="empty-table" :colspan="columns.length">
+                <td class="empty-table" :colspan="columns.length + (isSelectableTable ? 2 : 0)">
                   {{ hasActiveFilter ? 'По вашему запросу ничего не найдено' : 'В таблице пока нет записей' }}
                 </td>
               </tr>

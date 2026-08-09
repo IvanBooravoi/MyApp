@@ -811,6 +811,79 @@ button {
   gap: 14px;
 }
 
+.selection-actions,
+.selected-components-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.selection-actions {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.selected-components-actions {
+  margin-bottom: 18px;
+  justify-content: space-between;
+}
+
+.selection-column {
+  width: 48px;
+  text-align: center !important;
+}
+
+.selection-column input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.data-table-scroll .data-row--selected td {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.selection-remove-column {
+  width: 1%;
+  text-align: right !important;
+}
+
+.quantity-column {
+  width: 130px;
+  text-align: center !important;
+}
+
+.quantity-input {
+  width: 100px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-surface);
+  text-align: right;
+}
+
+.quantity-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.nav-item-count {
+  min-width: 22px;
+  padding: 2px 6px;
+  margin-left: auto;
+  border-radius: 10px;
+  color: white;
+  background: var(--accent);
+  font-size: 11px;
+  text-align: center;
+}
+
 .worker-filters {
   display: grid;
   margin-bottom: 16px;
@@ -1064,6 +1137,12 @@ button {
   }
 
   .table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .selection-actions,
+  .selected-components-actions {
     align-items: stretch;
     flex-direction: column;
   }

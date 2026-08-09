@@ -22,12 +22,17 @@ const props = defineProps({
     type: Boolean,
     required: true,
   },
+  selectedComponentsCount: {
+    type: Number,
+    required: true,
+  },
 })
 
 const emit = defineEmits([
   'toggle',
   'navigate',
   'navigate-table',
+  'navigate-selected-components',
   'navigate-settings',
   'logout',
 ])
@@ -104,7 +109,7 @@ function toggleSettings() {
       </button>
       <button
         class="nav-link"
-        :class="{ 'nav-link--active': activePage === 'tables' }"
+        :class="{ 'nav-link--active': activePage === 'tables' || activePage === 'selected-components' }"
         type="button"
         :aria-expanded="isTablesExpanded"
         aria-controls="tables-submenu"
@@ -150,6 +155,17 @@ function toggleSettings() {
           @click="$emit('navigate-table', 'v_workers')"
         >
           Работники
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{ 'nav-submenu-link--active': activePage === 'selected-components' }"
+          type="button"
+          @click="$emit('navigate-selected-components')"
+        >
+          Выбранные компоненты
+          <span v-if="selectedComponentsCount" class="nav-item-count">
+            {{ selectedComponentsCount }}
+          </span>
         </button>
       </div>
       <button
