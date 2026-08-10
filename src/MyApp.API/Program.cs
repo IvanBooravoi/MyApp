@@ -19,9 +19,19 @@ var jwtOptions = new JwtOptions(
         ?? throw new InvalidOperationException("Configuration value 'Jwt:Issuer' is required."),
     jwtSection.GetValue<string>("Audience")
         ?? throw new InvalidOperationException("Configuration value 'Jwt:Audience' is required."));
+var componentPdfTemplatePath = builder.Configuration.GetValue<string>(
+    "DocumentTemplates:ComponentIssuePath")
+    ?? "/mnt/dietpi_userdata/Document/t.pdf";
+var componentPdfFontPath = builder.Configuration.GetValue<string>(
+    "DocumentTemplates:FontPath")
+    ?? "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(connectionString, jwtOptions);
+builder.Services.AddInfrastructure(
+    connectionString,
+    jwtOptions,
+    componentPdfTemplatePath,
+    componentPdfFontPath);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
 
@@ -42,5 +52,6 @@ app.MapAuthEndpoints();
 app.MapAdminUserEndpoints();
 app.MapProfessionEndpoints();
 app.MapTableViewEndpoints();
+app.MapComponentDocumentEndpoints();
 
 app.Run();

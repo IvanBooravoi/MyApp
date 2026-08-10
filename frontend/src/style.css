@@ -829,6 +829,53 @@ button {
   justify-content: space-between;
 }
 
+.document-form {
+  display: grid;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  grid-template-columns: minmax(150px, 0.5fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  background: color-mix(in srgb, var(--bg-surface) 75%, transparent);
+}
+
+.document-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.document-form label span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.document-form input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-surface);
+}
+
+.document-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.document-form .primary-button {
+  width: auto;
+  height: 42px;
+  margin: 0;
+  white-space: nowrap;
+}
+
 .selection-column {
   width: 48px;
   text-align: center !important;
@@ -1145,6 +1192,10 @@ button {
   .selected-components-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .document-form {
+    grid-template-columns: 1fr;
   }
 
   .worker-filters {

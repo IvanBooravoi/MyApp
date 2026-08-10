@@ -92,6 +92,7 @@ function openSelectedComponents() {
       v-else-if="currentPage === 'selected-components'"
       :navigation-collapsed="isNavigationCollapsed"
       :rows="selectedMehRows"
+      :token="token"
       @back="openTable('v_meh_ost')"
       @clear="selectedMehRows = []"
       @update:rows="selectedMehRows = $event"

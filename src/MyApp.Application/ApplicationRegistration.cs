@@ -12,6 +12,7 @@ public static class ApplicationRegistration
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IProfessionService, ProfessionService>();
         services.AddScoped<ITableViewService, TableViewService>();
+        services.AddScoped<IComponentDocumentService, ComponentDocumentService>();
         return services;
     }
 }

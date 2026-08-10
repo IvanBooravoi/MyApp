@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -10,9 +10,17 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  token: {
+    type: String,
+    required: true,
+  },
 })
 
 const emit = defineEmits(['back', 'clear', 'update:rows'])
+const vehicleNumber = ref('')
+const documentDate = ref(formatLocalDate(new Date()))
+const documentError = ref('')
+const isGeneratingDocument = ref(false)
 
 const databaseQuantityColumns = new Set([
   'amount',
@@ -54,11 +62,117 @@ function formatCell(value) {
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
+function formatLocalDate(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function removeRow(index) {
   emit(
     'update:rows',
     props.rows.filter((_, rowIndex) => rowIndex !== index),
   )
+}
+
+function base64ToBlob(content) {
+  const binary = atob(content)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new Blob([bytes], { type: 'application/pdf' })
+}
+
+function renderDocuments(previewWindow, documents) {
+  previewWindow.document.title = 'Требования-накладные'
+  previewWindow.document.body.replaceChildren()
+  Object.assign(previewWindow.document.body.style, {
+    margin: '0',
+    background: '#333',
+  })
+
+  const urls = documents.map((document) =>
+    URL.createObjectURL(base64ToBlob(document.content)),
+  )
+  urls.forEach((url) => {
+    const frame = previewWindow.document.createElement('iframe')
+    frame.src = url
+    frame.title = 'Требование-накладная'
+    Object.assign(frame.style, {
+      display: 'block',
+      width: '100%',
+      height: '100vh',
+      border: '0',
+    })
+    previewWindow.document.body.append(frame)
+  })
+  previewWindow.addEventListener('beforeunload', () => {
+    urls.forEach((url) => URL.revokeObjectURL(url))
+  })
+}
+
+async function generateDocument() {
+  documentError.value = ''
+  if (!vehicleNumber.value.trim()) {
+    documentError.value = 'Укажите номер техники.'
+    return
+  }
+
+  if (props.rows.length > 100) {
+    documentError.value = 'Можно сформировать не более 100 компонентов за один раз.'
+    return
+  }
+
+  const previewWindow = window.open('', '_blank')
+  if (!previewWindow) {
+    documentError.value = 'Разрешите открытие всплывающих окон для просмотра PDF.'
+    return
+  }
+
+  previewWindow.document.body.textContent = 'Формирование PDF...'
+  isGeneratingDocument.value = true
+  try {
+    const response = await fetch('/api/documents/components', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${props.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        date: documentDate.value,
+        vehicleNumber: vehicleNumber.value.trim(),
+        items: props.rows.map((row) => ({
+          name: String(row['Наименование'] ?? ''),
+          unit: String(row['Ед.изм.'] ?? ''),
+          quantity: Number(row.__quantity ?? 1),
+        })),
+      }),
+    })
+
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null)
+      const validationMessage = problem?.errors
+        ? Object.values(problem.errors).flat()[0]
+        : null
+      throw new Error(
+        validationMessage ??
+          problem?.detail ??
+          problem?.title ??
+          'Не удалось сформировать PDF.',
+      )
+    }
+
+    const result = await response.json()
+    renderDocuments(previewWindow, result.documents)
+  } catch (error) {
+    previewWindow.close()
+    documentError.value =
+      error instanceof Error ? error.message : 'Не удалось сформировать PDF.'
+  } finally {
+    isGeneratingDocument.value = false
+  }
 }
 
 </script>
@@ -95,6 +209,31 @@ function removeRow(index) {
           Очистить список
         </button>
       </div>
+
+      <form class="document-form" @submit.prevent="generateDocument">
+        <label>
+          <span>Дата</span>
+          <input v-model="documentDate" type="date" required />
+        </label>
+        <label>
+          <span>Номер техники</span>
+          <input
+            v-model="vehicleNumber"
+            type="text"
+            maxlength="100"
+            placeholder="Введите номер техники"
+            required
+          />
+        </label>
+        <button
+          class="primary-button"
+          type="submit"
+          :disabled="rows.length === 0 || isGeneratingDocument"
+        >
+          {{ isGeneratingDocument ? 'Формирование...' : 'Просмотреть PDF' }}
+        </button>
+      </form>
+      <p v-if="documentError" class="form-error" role="alert">{{ documentError }}</p>
 
       <div class="data-table-scroll">
         <table v-if="rows.length">

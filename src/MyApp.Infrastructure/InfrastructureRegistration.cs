@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MyApp.Application.Abstractions;
 using MyApp.Application.Security;
 using MyApp.Infrastructure.Db;
+using MyApp.Infrastructure.Documents;
 using MyApp.Infrastructure.Repositories;
 using MyApp.Infrastructure.Security;
 using Npgsql;
@@ -14,7 +15,9 @@ public static class InfrastructureRegistration
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         string connectionString,
-        JwtOptions jwtOptions)
+        JwtOptions jwtOptions,
+        string componentPdfTemplatePath,
+        string componentPdfFontPath)
     {
         services.AddDbContext<AppDbContext>(
             options => options.UseNpgsql(connectionString));
@@ -26,6 +29,10 @@ public static class InfrastructureRegistration
         services.AddScoped<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddScoped<ITokenProvider, JwtTokenProvider>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
+        services.AddSingleton<IComponentDocumentRenderer>(
+            new PdfComponentDocumentRenderer(
+                componentPdfTemplatePath,
+                componentPdfFontPath));
         return services;
     }
 
