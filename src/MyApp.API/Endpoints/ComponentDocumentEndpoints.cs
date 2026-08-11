@@ -1,5 +1,6 @@
 using MyApp.Application.DTO;
 using MyApp.Application.Services;
+using PdfSharp.Pdf.IO;
 
 namespace MyApp.API.Endpoints;
 
@@ -30,6 +31,27 @@ public static class ComponentDocumentEndpoints
                     exception.Message,
                     statusCode: StatusCodes.Status500InternalServerError,
                     title: "Некорректный PDF-шаблон");
+            }
+            catch (PdfReaderException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Не удалось прочитать PDF-шаблон");
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Нет доступа к PDF-шаблону");
+            }
+            catch (IOException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Ошибка чтения или записи PDF");
             }
         }).RequireAuthorization();
 

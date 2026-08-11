@@ -20,9 +20,9 @@ const token = ref(storedRole ? storedToken : null)
 const role = ref(storedRole)
 const isNavigationCollapsed = ref(false)
 const currentPage = ref('home')
-const currentTable = ref('v_full_ost')
+const currentTable = ref('full_ost')
 const currentSettings = ref('users')
-const selectedMehRows = ref([])
+const selectedComponentRows = ref([])
 
 function handleAuthenticated(authData) {
   localStorage.setItem(TOKEN_KEY, authData.token)
@@ -38,7 +38,7 @@ function handleLogout() {
   role.value = null
   isNavigationCollapsed.value = false
   currentPage.value = 'home'
-  selectedMehRows.value = []
+  selectedComponentRows.value = []
 }
 
 function openTable(tableName) {
@@ -66,7 +66,7 @@ function openSelectedComponents() {
       :active-table="currentTable"
       :active-settings="currentSettings"
       :is-admin="role === 'administrator'"
-      :selected-components-count="selectedMehRows.length"
+      :selected-components-count="selectedComponentRows.length"
       @toggle="isNavigationCollapsed = !isNavigationCollapsed"
       @navigate="currentPage = $event"
       @navigate-table="openTable"
@@ -82,20 +82,20 @@ function openSelectedComponents() {
       v-else-if="currentPage === 'tables'"
       :navigation-collapsed="isNavigationCollapsed"
       :selected-table-id="currentTable"
-      :selected-meh-rows="selectedMehRows"
+      :selected-component-rows="selectedComponentRows"
       :token="token"
       @select-table="currentTable = $event"
       @show-selected-components="openSelectedComponents"
-      @update:selected-meh-rows="selectedMehRows = $event"
+      @update:selected-component-rows="selectedComponentRows = $event"
     />
     <SelectedComponentsView
       v-else-if="currentPage === 'selected-components'"
       :navigation-collapsed="isNavigationCollapsed"
-      :rows="selectedMehRows"
+      :rows="selectedComponentRows"
       :token="token"
-      @back="openTable('v_meh_ost')"
-      @clear="selectedMehRows = []"
-      @update:rows="selectedMehRows = $event"
+      @back="openTable(currentTable)"
+      @clear="selectedComponentRows = []"
+      @update:rows="selectedComponentRows = $event"
     />
     <SettingsView
       v-else-if="currentPage === 'settings' && role === 'administrator'"

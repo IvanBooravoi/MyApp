@@ -1,9 +1,8 @@
 using System.Globalization;
 using MyApp.Application.Abstractions;
 using MyApp.Application.DTO;
-using PdfSharp.Fonts;
 using PdfSharp.Pdf;
-using PdfSharp.Pdf.AcroForms;
+using PdfSharp.Pdf.Advanced;
 using PdfSharp.Pdf.IO;
 
 namespace MyApp.Infrastructure.Documents;
@@ -12,18 +11,10 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
 {
     private const int ItemsPerDocument = 5;
     private readonly string _templatePath;
-    private readonly string _fontPath;
 
-    public PdfComponentDocumentRenderer(
-        string templatePath,
-        string fontPath)
+    public PdfComponentDocumentRenderer(string templatePath)
     {
         _templatePath = templatePath;
-        _fontPath = fontPath;
-        if (GlobalFontSettings.FontResolver is null)
-        {
-            GlobalFontSettings.FontResolver = new FileFontResolver(fontPath);
-        }
     }
 
     public IReadOnlyList<GeneratedPdfDocument> Render(
@@ -34,13 +25,6 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
             throw new FileNotFoundException(
                 $"PDF-шаблон не найден: {_templatePath}",
                 _templatePath);
-        }
-
-        if (!File.Exists(_fontPath))
-        {
-            throw new FileNotFoundException(
-                $"Шрифт для заполнения PDF не найден: {_fontPath}",
-                _fontPath);
         }
 
         var documents = new List<GeneratedPdfDocument>();
@@ -97,29 +81,80 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
         string fieldName,
         string value)
     {
-        var field = document.AcroForm?.Fields[fieldName];
-        if (field is not PdfTextField textField)
+        var fields = document.AcroForm?.Elements.GetArray("/Fields");
+        var field = fields is null
+            ? null
+            : FindField(fields, fieldName);
+        if (field is null)
         {
             throw new InvalidDataException(
                 $"В PDF-шаблоне отсутствует текстовое поле '{fieldName}'.");
         }
 
-        textField.Value = new PdfString(value, PdfStringEncoding.Unicode);
-        textField.ReadOnly = true;
-        RemoveAppearance(textField);
+        field.Elements["/V"] = new PdfString(value, PdfStringEncoding.Unicode);
+        field.Elements.SetInteger(
+            "/Ff",
+            field.Elements.GetInteger("/Ff") | 1);
+        RemoveAppearance(field);
     }
 
-    private static void RemoveAppearance(PdfAcroField field)
+    private static PdfDictionary? FindField(
+        PdfArray fields,
+        string fieldName)
+    {
+        foreach (var item in fields.Elements)
+        {
+            var field = ResolveDictionary(item);
+            if (field is null)
+            {
+                continue;
+            }
+
+            if (field.Elements.GetString("/T").Equals(
+                fieldName,
+                StringComparison.Ordinal))
+            {
+                return field;
+            }
+
+            var children = field.Elements.GetArray("/Kids");
+            if (children is not null)
+            {
+                var match = FindField(children, fieldName);
+                if (match is not null)
+                {
+                    return match;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static PdfDictionary? ResolveDictionary(PdfItem item) =>
+        item switch
+        {
+            PdfDictionary dictionary => dictionary,
+            PdfReference reference => reference.Value as PdfDictionary,
+            _ => null
+        };
+
+    private static void RemoveAppearance(PdfDictionary field)
     {
         field.Elements.Remove("/AP");
-        if (!field.HasKids)
+        var children = field.Elements.GetArray("/Kids");
+        if (children is null)
         {
             return;
         }
 
-        for (var index = 0; index < field.Fields.Count; index++)
+        foreach (var childItem in children.Elements)
         {
-            RemoveAppearance(field.Fields[index]);
+            var child = ResolveDictionary(childItem);
+            if (child is not null)
+            {
+                RemoveAppearance(child);
+            }
         }
     }
 }

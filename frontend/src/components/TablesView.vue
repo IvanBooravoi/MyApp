@@ -14,17 +14,17 @@ const props = defineProps({
     type: String,
     required: true,
   },
-  selectedMehRows: {
+  selectedComponentRows: {
     type: Array,
     required: true,
   },
 })
 
-const emit = defineEmits(['show-selected-components', 'update:selected-meh-rows'])
+const emit = defineEmits(['show-selected-components', 'update:selected-component-rows'])
 
 const tables = [
-  { id: 'v_full_ost', name: 'Остатки на складе' },
-  { id: 'v_meh_ost', name: 'Остатки механиков' },
+  { id: 'full_ost', name: 'Остатки на складе' },
+  { id: 'meh_ost', name: 'Остатки механиков' },
   { id: 'v_workers', name: 'Работники' },
 ]
 
@@ -57,9 +57,11 @@ const totalPages = computed(() => {
 })
 
 const isWorkersTable = computed(() => props.selectedTableId === 'v_workers')
-const isSelectableTable = computed(() => props.selectedTableId === 'v_meh_ost')
+const isSelectableTable = computed(
+  () => props.selectedTableId === 'full_ost' || props.selectedTableId === 'meh_ost',
+)
 const selectedRowKeys = computed(
-  () => new Set(props.selectedMehRows.map((row) => getRowKey(row))),
+  () => new Set(props.selectedComponentRows.map((row) => getRowKey(row))),
 )
 const areAllVisibleRowsSelected = computed(
   () =>
@@ -73,6 +75,10 @@ const hasActiveFilter = computed(
 )
 
 const columnLabels = {
+  name: 'Наименование',
+  unit: 'Ед. изм.',
+  amount: 'Количество',
+  price: 'Цена',
   LastName: 'Фамилия',
   FirstName: 'Имя',
   Patronymic: 'Отчество',
@@ -89,17 +95,21 @@ function formatCell(value) {
 }
 
 function getRowKey(row) {
+  const sourceTable = row.__sourceTable ?? props.selectedTableId
   return JSON.stringify(
-    Object.keys(row)
-      .filter((key) => key !== '__quantity')
-      .sort()
-      .map((key) => [key, row[key]]),
+    [
+      sourceTable,
+      Object.keys(row)
+        .filter((key) => !key.startsWith('__'))
+        .sort()
+        .map((key) => [key, row[key]]),
+    ],
   )
 }
 
 function getSelectedRow(row) {
   const key = getRowKey(row)
-  return props.selectedMehRows.find((selectedRow) => getRowKey(selectedRow) === key)
+  return props.selectedComponentRows.find((selectedRow) => getRowKey(selectedRow) === key)
 }
 
 function getQuantity(row) {
@@ -113,48 +123,59 @@ function isRowSelected(row) {
 function toggleRow(row) {
   const key = getRowKey(row)
   const nextRows = isRowSelected(row)
-    ? props.selectedMehRows.filter((selectedRow) => getRowKey(selectedRow) !== key)
-    : [...props.selectedMehRows, { ...row, __quantity: 1 }]
-  emit('update:selected-meh-rows', nextRows)
+    ? props.selectedComponentRows.filter((selectedRow) => getRowKey(selectedRow) !== key)
+    : [
+        ...props.selectedComponentRows,
+        { ...row, __sourceTable: props.selectedTableId, __quantity: 1 },
+      ]
+  emit('update:selected-component-rows', nextRows)
 }
 
 function updateQuantity(row, value) {
   const parsedValue = Number(String(value).replace(',', '.'))
   const quantity = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 1
   const key = getRowKey(row)
-  const nextRows = props.selectedMehRows.map((selectedRow) =>
+  const nextRows = props.selectedComponentRows.map((selectedRow) =>
     getRowKey(selectedRow) === key
       ? { ...selectedRow, __quantity: quantity }
       : selectedRow,
   )
 
   if (!isRowSelected(row)) {
-    nextRows.push({ ...row, __quantity: quantity })
+    nextRows.push({
+      ...row,
+      __sourceTable: props.selectedTableId,
+      __quantity: quantity,
+    })
   }
 
-  emit('update:selected-meh-rows', nextRows)
+  emit('update:selected-component-rows', nextRows)
 }
 
 function toggleVisibleRows() {
   const visibleKeys = new Set(rows.value.map((row) => getRowKey(row)))
   if (areAllVisibleRowsSelected.value) {
     emit(
-      'update:selected-meh-rows',
-      props.selectedMehRows.filter((row) => !visibleKeys.has(getRowKey(row))),
+      'update:selected-component-rows',
+      props.selectedComponentRows.filter((row) => !visibleKeys.has(getRowKey(row))),
     )
     return
   }
 
-  const nextRows = [...props.selectedMehRows]
+  const nextRows = [...props.selectedComponentRows]
   const existingKeys = new Set(selectedRowKeys.value)
   rows.value.forEach((row) => {
     const key = getRowKey(row)
     if (!existingKeys.has(key)) {
-      nextRows.push({ ...row, __quantity: 1 })
+      nextRows.push({
+        ...row,
+        __sourceTable: props.selectedTableId,
+        __quantity: 1,
+      })
       existingKeys.add(key)
     }
   })
-  emit('update:selected-meh-rows', nextRows)
+  emit('update:selected-component-rows', nextRows)
 }
 
 async function loadTable() {
@@ -312,11 +333,11 @@ watch(
           </label>
 
           <div v-if="isSelectableTable" class="selection-actions">
-            <span>Выбрано: {{ selectedMehRows.length }}</span>
+            <span>Выбрано: {{ selectedComponentRows.length }}</span>
             <button
               class="secondary-button"
               type="button"
-              :disabled="selectedMehRows.length === 0"
+              :disabled="selectedComponentRows.length === 0"
               @click="$emit('show-selected-components')"
             >
               Показать выбранные

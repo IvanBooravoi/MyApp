@@ -134,17 +134,17 @@ function toggleSettings() {
       >
         <button
           class="nav-submenu-link"
-          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'v_full_ost' }"
+          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'full_ost' }"
           type="button"
-          @click="$emit('navigate-table', 'v_full_ost')"
+          @click="$emit('navigate-table', 'full_ost')"
         >
           Остатки на складе
         </button>
         <button
           class="nav-submenu-link"
-          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'v_meh_ost' }"
+          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'meh_ost' }"
           type="button"
-          @click="$emit('navigate-table', 'v_meh_ost')"
+          @click="$emit('navigate-table', 'meh_ost')"
         >
           Остатки механиков
         </button>

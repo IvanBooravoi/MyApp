@@ -16,8 +16,7 @@ public static class InfrastructureRegistration
         this IServiceCollection services,
         string connectionString,
         JwtOptions jwtOptions,
-        string componentPdfTemplatePath,
-        string componentPdfFontPath)
+        string componentPdfTemplatePath)
     {
         services.AddDbContext<AppDbContext>(
             options => options.UseNpgsql(connectionString));
@@ -30,9 +29,7 @@ public static class InfrastructureRegistration
         services.AddScoped<ITokenProvider, JwtTokenProvider>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
         services.AddSingleton<IComponentDocumentRenderer>(
-            new PdfComponentDocumentRenderer(
-                componentPdfTemplatePath,
-                componentPdfFontPath));
+            new PdfComponentDocumentRenderer(componentPdfTemplatePath));
         return services;
     }
 

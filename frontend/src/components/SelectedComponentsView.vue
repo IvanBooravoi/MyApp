@@ -40,6 +40,11 @@ const hiddenDatabaseColumns = new Set([
   'цена',
 ])
 
+const columnLabels = {
+  name: 'Наименование',
+  unit: 'Ед. изм.',
+}
+
 function isHiddenDatabaseColumn(column) {
   return hiddenDatabaseColumns.has(column.trim().toLowerCase())
 }
@@ -48,7 +53,7 @@ const columns = computed(() => {
   const names = new Set()
   props.rows.forEach((row) => {
     Object.keys(row)
-      .filter((column) => column !== '__quantity' && !isHiddenDatabaseColumn(column))
+      .filter((column) => !column.startsWith('__') && !isHiddenDatabaseColumn(column))
       .forEach((column) => names.add(column))
   })
   return [...names]
@@ -60,6 +65,14 @@ function formatCell(value) {
   }
 
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function getRowValue(row, aliases) {
+  const normalizedAliases = new Set(aliases.map((alias) => alias.toLowerCase()))
+  const key = Object.keys(row).find((column) =>
+    normalizedAliases.has(column.toLowerCase()),
+  )
+  return key ? row[key] : ''
 }
 
 function formatLocalDate(date) {
@@ -144,8 +157,8 @@ async function generateDocument() {
         date: documentDate.value,
         vehicleNumber: vehicleNumber.value.trim(),
         items: props.rows.map((row) => ({
-          name: String(row['Наименование'] ?? ''),
-          unit: String(row['Ед.изм.'] ?? ''),
+          name: String(getRowValue(row, ['name', 'Наименование']) ?? ''),
+          unit: String(getRowValue(row, ['unit', 'Ед.изм.', 'Ед. изм.']) ?? ''),
           quantity: Number(row.__quantity ?? 1),
         })),
       }),
@@ -181,7 +194,7 @@ async function generateDocument() {
   <main class="home-page tables-page" :class="{ 'home-page--expanded': navigationCollapsed }">
     <header class="home-header">
       <div>
-        <p class="eyebrow">V_MEH_OST</p>
+        <p class="eyebrow">FULL_OST / MEH_OST</p>
         <h1>Выбранные компоненты</h1>
       </div>
       <div class="user-avatar" aria-label="Профиль пользователя">П</div>
@@ -239,7 +252,9 @@ async function generateDocument() {
         <table v-if="rows.length">
           <thead>
             <tr>
-              <th v-for="column in columns" :key="column">{{ column }}</th>
+              <th v-for="column in columns" :key="column">
+                {{ columnLabels[column] ?? column }}
+              </th>
               <th class="quantity-column">Количество</th>
               <th class="selection-remove-column">Действие</th>
             </tr>

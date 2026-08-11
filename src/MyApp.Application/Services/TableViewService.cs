@@ -10,8 +10,8 @@ public sealed class TableViewService(
     private static readonly HashSet<string> AllowedViews =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "v_full_ost",
-            "v_meh_ost",
+            "full_ost",
+            "meh_ost",
             "v_workers"
         };
 
