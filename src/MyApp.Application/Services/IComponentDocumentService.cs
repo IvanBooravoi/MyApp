@@ -5,6 +5,8 @@ namespace MyApp.Application.Services;
 
 public interface IComponentDocumentService
 {
-    ServiceResult<ComponentDocumentsResponse> Generate(
-        ComponentDocumentRequest request);
+    Task<ServiceResult<ComponentDocumentsResponse>> GenerateAsync(
+        ComponentDocumentRequest request,
+        Guid userId,
+        CancellationToken cancellationToken);
 }

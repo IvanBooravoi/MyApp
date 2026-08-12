@@ -18,9 +18,17 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  selectedResponsibleEmployee: {
+    type: Object,
+    default: null,
+  },
 })
 
-const emit = defineEmits(['show-selected-components', 'update:selected-component-rows'])
+const emit = defineEmits([
+  'show-selected-components',
+  'update:selected-component-rows',
+  'update:selected-responsible-employee',
+])
 
 const tables = [
   { id: 'full_ost', name: 'Остатки на складе' },
@@ -36,6 +44,9 @@ const pageSize = ref('20')
 const searchQuery = ref('')
 const errorMessage = ref('')
 const isLoading = ref(false)
+const responsibleEmployees = ref([])
+const responsibleEmployeeError = ref('')
+const isLoadingResponsibleEmployees = ref(false)
 const workerFilters = reactive({
   lastName: '',
   firstName: '',
@@ -60,6 +71,26 @@ const isWorkersTable = computed(() => props.selectedTableId === 'v_workers')
 const isSelectableTable = computed(
   () => props.selectedTableId === 'full_ost' || props.selectedTableId === 'meh_ost',
 )
+const responsibleProfession = computed(() =>
+  props.selectedTableId === 'full_ost' ? 'Кладовщик' : 'Старший механик',
+)
+const selectedResponsibleKey = computed({
+  get() {
+    if (props.selectedResponsibleEmployee?.sourceTable !== props.selectedTableId) {
+      return ''
+    }
+    return getEmployeeKey(props.selectedResponsibleEmployee)
+  },
+  set(key) {
+    const employee = responsibleEmployees.value.find(
+      (item) => getEmployeeKey(item) === key,
+    )
+    emit(
+      'update:selected-responsible-employee',
+      employee ? { ...employee, sourceTable: props.selectedTableId } : null,
+    )
+  },
+})
 const selectedRowKeys = computed(
   () => new Set(props.selectedComponentRows.map((row) => getRowKey(row))),
 )
@@ -77,7 +108,7 @@ const hasActiveFilter = computed(
 const columnLabels = {
   name: 'Наименование',
   unit: 'Ед. изм.',
-  amount: 'Количество',
+  amount: 'На остатке',
   price: 'Цена',
   LastName: 'Фамилия',
   FirstName: 'Имя',
@@ -92,6 +123,49 @@ function formatCell(value) {
   }
 
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function getEmployeeKey(employee) {
+  return JSON.stringify([
+    employee.firstName,
+    employee.patronymic,
+    employee.lastName,
+  ])
+}
+
+function getEmployeeName(employee) {
+  return [employee.lastName, employee.firstName, employee.patronymic]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function loadResponsibleEmployees() {
+  responsibleEmployees.value = []
+  responsibleEmployeeError.value = ''
+  if (!isSelectableTable.value) {
+    return
+  }
+
+  isLoadingResponsibleEmployees.value = true
+  try {
+    const query = new URLSearchParams({ sourceTable: props.selectedTableId })
+    const response = await fetch(`/api/employees/responsible?${query}`, {
+      headers: {
+        Authorization: `Bearer ${props.token}`,
+      },
+    })
+    if (!response.ok) {
+      throw new Error('Не удалось загрузить список ответственных лиц.')
+    }
+    responsibleEmployees.value = await response.json()
+  } catch (error) {
+    responsibleEmployeeError.value =
+      error instanceof Error
+        ? error.message
+        : 'Не удалось загрузить список ответственных лиц.'
+  } finally {
+    isLoadingResponsibleEmployees.value = false
+  }
 }
 
 function getRowKey(row) {
@@ -112,8 +186,35 @@ function getSelectedRow(row) {
   return props.selectedComponentRows.find((selectedRow) => getRowKey(selectedRow) === key)
 }
 
+function getCurrentTableSelections() {
+  return props.selectedComponentRows.filter(
+    (row) => row.__sourceTable === props.selectedTableId,
+  )
+}
+
 function getQuantity(row) {
-  return getSelectedRow(row)?.__quantity ?? 1
+  return getSelectedRow(row)?.__requestedQuantity ?? 1
+}
+
+function getAvailableQuantity(row) {
+  const key = Object.keys(row).find((column) =>
+    ['amount', 'количество'].includes(column.trim().toLowerCase()),
+  )
+  const quantity = Number(key ? row[key] : 0)
+  return Number.isFinite(quantity) ? Math.max(quantity, 0) : 0
+}
+
+function createSelectedRow(row, requestedQuantity) {
+  const availableQuantity = getAvailableQuantity(row)
+  const quantity = Math.min(availableQuantity, requestedQuantity)
+  return {
+    ...row,
+    __sourceTable: props.selectedTableId,
+    __availableQuantity: availableQuantity,
+    __requestedQuantity: requestedQuantity,
+    __quantity: quantity,
+    __remainingQuantity: Math.max(availableQuantity - quantity, 0),
+  }
 }
 
 function isRowSelected(row) {
@@ -123,10 +224,12 @@ function isRowSelected(row) {
 function toggleRow(row) {
   const key = getRowKey(row)
   const nextRows = isRowSelected(row)
-    ? props.selectedComponentRows.filter((selectedRow) => getRowKey(selectedRow) !== key)
+    ? getCurrentTableSelections().filter(
+        (selectedRow) => getRowKey(selectedRow) !== key,
+      )
     : [
-        ...props.selectedComponentRows,
-        { ...row, __sourceTable: props.selectedTableId, __quantity: 1 },
+        ...getCurrentTableSelections(),
+        createSelectedRow(row, 1),
       ]
   emit('update:selected-component-rows', nextRows)
 }
@@ -135,18 +238,14 @@ function updateQuantity(row, value) {
   const parsedValue = Number(String(value).replace(',', '.'))
   const quantity = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 1
   const key = getRowKey(row)
-  const nextRows = props.selectedComponentRows.map((selectedRow) =>
+  const nextRows = getCurrentTableSelections().map((selectedRow) =>
     getRowKey(selectedRow) === key
-      ? { ...selectedRow, __quantity: quantity }
+      ? createSelectedRow(row, quantity)
       : selectedRow,
   )
 
   if (!isRowSelected(row)) {
-    nextRows.push({
-      ...row,
-      __sourceTable: props.selectedTableId,
-      __quantity: quantity,
-    })
+    nextRows.push(createSelectedRow(row, quantity))
   }
 
   emit('update:selected-component-rows', nextRows)
@@ -157,21 +256,19 @@ function toggleVisibleRows() {
   if (areAllVisibleRowsSelected.value) {
     emit(
       'update:selected-component-rows',
-      props.selectedComponentRows.filter((row) => !visibleKeys.has(getRowKey(row))),
+      getCurrentTableSelections().filter(
+        (row) => !visibleKeys.has(getRowKey(row)),
+      ),
     )
     return
   }
 
-  const nextRows = [...props.selectedComponentRows]
+  const nextRows = [...getCurrentTableSelections()]
   const existingKeys = new Set(selectedRowKeys.value)
   rows.value.forEach((row) => {
     const key = getRowKey(row)
     if (!existingKeys.has(key)) {
-      nextRows.push({
-        ...row,
-        __sourceTable: props.selectedTableId,
-        __quantity: 1,
-      })
+      nextRows.push(createSelectedRow(row, 1))
       existingKeys.add(key)
     }
   })
@@ -213,7 +310,11 @@ async function loadTable() {
     }
 
     const data = await response.json()
-    columns.value = data.columns
+    columns.value = data.columns.filter(
+      (column) =>
+        props.selectedTableId !== 'meh_ost' ||
+        !['price', 'цена'].includes(column.trim().toLowerCase()),
+    )
     rows.value = data.rows
     totalRows.value = data.total
   } catch (error) {
@@ -251,6 +352,7 @@ watch(
     })
     currentPage.value = 1
     loadTable()
+    loadResponsibleEmployees()
   },
   { immediate: true },
 )
@@ -315,10 +417,34 @@ watch(
           </label>
         </div>
 
+        <div v-if="isSelectableTable" class="responsible-employee-field">
+          <label>
+            <span>Ответственный за выдачу — {{ responsibleProfession }}</span>
+            <select
+              v-model="selectedResponsibleKey"
+              :disabled="isLoadingResponsibleEmployees || Boolean(responsibleEmployeeError)"
+            >
+              <option value="">
+                {{ isLoadingResponsibleEmployees ? 'Загрузка...' : 'Выберите сотрудника' }}
+              </option>
+              <option
+                v-for="employee in responsibleEmployees"
+                :key="getEmployeeKey(employee)"
+                :value="getEmployeeKey(employee)"
+              >
+                {{ getEmployeeName(employee) }}
+              </option>
+            </select>
+          </label>
+          <p v-if="responsibleEmployeeError" class="form-error" role="alert">
+            {{ responsibleEmployeeError }}
+          </p>
+        </div>
+
         <div class="table-toolbar">
           <label class="table-search">
             <span class="visually-hidden">Поиск по таблице</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
+            <svg v-if="!isWorkersTable" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7"></circle>
               <path d="m16 16 5 5"></path>
             </svg>
@@ -376,7 +502,7 @@ watch(
                 <th v-for="column in columns" :key="column">
                   {{ columnLabels[column] ?? column }}
                 </th>
-                <th v-if="isSelectableTable" class="quantity-column">Количество</th>
+                <th v-if="isSelectableTable" class="quantity-column">Списать</th>
               </tr>
             </thead>
             <tbody>

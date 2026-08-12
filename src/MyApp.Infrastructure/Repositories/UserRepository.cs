@@ -26,7 +26,9 @@ public sealed class UserRepository(AppDbContext db) : IUserRepository
     public Task<User?> FindByIdAsync(
         Guid id,
         CancellationToken cancellationToken) =>
-        db.Users.FindAsync([id], cancellationToken).AsTask();
+        db.Users
+            .Include(user => user.Profession)
+            .FirstOrDefaultAsync(user => user.Id == id, cancellationToken);
 
     public Task<bool> UserNameExistsAsync(
         string userName,

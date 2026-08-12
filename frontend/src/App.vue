@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import AuthLogin from './components/AuthLogin.vue'
 import HomeView from './components/HomeView.vue'
 import NavigationSidebar from './components/NavigationSidebar.vue'
+import RequirementsJournalView from './components/RequirementsJournalView.vue'
 import SelectedComponentsView from './components/SelectedComponentsView.vue'
 import SettingsView from './components/SettingsView.vue'
 import TablesView from './components/TablesView.vue'
@@ -23,6 +24,7 @@ const currentPage = ref('home')
 const currentTable = ref('full_ost')
 const currentSettings = ref('users')
 const selectedComponentRows = ref([])
+const selectedResponsibleEmployee = ref(null)
 
 function handleAuthenticated(authData) {
   localStorage.setItem(TOKEN_KEY, authData.token)
@@ -39,9 +41,16 @@ function handleLogout() {
   isNavigationCollapsed.value = false
   currentPage.value = 'home'
   selectedComponentRows.value = []
+  selectedResponsibleEmployee.value = null
 }
 
 function openTable(tableName) {
+  if (
+    tableName !== currentTable.value &&
+    (tableName === 'full_ost' || tableName === 'meh_ost')
+  ) {
+    selectedResponsibleEmployee.value = null
+  }
   currentTable.value = tableName
   currentPage.value = 'tables'
 }
@@ -53,6 +62,29 @@ function openSettings(section) {
 
 function openSelectedComponents() {
   currentPage.value = 'selected-components'
+}
+
+function updateResponsibleEmployee(employee) {
+  if (
+    employee &&
+    selectedComponentRows.value.some(
+      (row) => row.__sourceTable !== employee.sourceTable,
+    )
+  ) {
+    selectedComponentRows.value = []
+  }
+  selectedResponsibleEmployee.value = employee
+}
+
+function updateSelectedComponentRows(rows) {
+  selectedComponentRows.value = rows
+  const sourceTable = rows[0]?.__sourceTable
+  if (
+    sourceTable &&
+    selectedResponsibleEmployee.value?.sourceTable !== sourceTable
+  ) {
+    selectedResponsibleEmployee.value = null
+  }
 }
 </script>
 
@@ -83,19 +115,27 @@ function openSelectedComponents() {
       :navigation-collapsed="isNavigationCollapsed"
       :selected-table-id="currentTable"
       :selected-component-rows="selectedComponentRows"
+      :selected-responsible-employee="selectedResponsibleEmployee"
       :token="token"
       @select-table="currentTable = $event"
       @show-selected-components="openSelectedComponents"
-      @update:selected-component-rows="selectedComponentRows = $event"
+      @update:selected-component-rows="updateSelectedComponentRows"
+      @update:selected-responsible-employee="updateResponsibleEmployee"
     />
     <SelectedComponentsView
       v-else-if="currentPage === 'selected-components'"
       :navigation-collapsed="isNavigationCollapsed"
       :rows="selectedComponentRows"
+      :responsible-employee="selectedResponsibleEmployee"
       :token="token"
       @back="openTable(currentTable)"
       @clear="selectedComponentRows = []"
-      @update:rows="selectedComponentRows = $event"
+      @update:rows="updateSelectedComponentRows"
+    />
+    <RequirementsJournalView
+      v-else-if="currentPage === 'requirements'"
+      :navigation-collapsed="isNavigationCollapsed"
+      :token="token"
     />
     <SettingsView
       v-else-if="currentPage === 'settings' && role === 'administrator'"

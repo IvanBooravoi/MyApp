@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { renderPdfDocument } from '../utils/pdfPreview'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -13,6 +14,10 @@ const props = defineProps({
   token: {
     type: String,
     required: true,
+  },
+  responsibleEmployee: {
+    type: Object,
+    default: null,
   },
 })
 
@@ -89,47 +94,26 @@ function removeRow(index) {
   )
 }
 
-function base64ToBlob(content) {
-  const binary = atob(content)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index++) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return new Blob([bytes], { type: 'application/pdf' })
-}
-
-function renderDocuments(previewWindow, documents) {
-  previewWindow.document.title = 'Требования-накладные'
-  previewWindow.document.body.replaceChildren()
-  Object.assign(previewWindow.document.body.style, {
-    margin: '0',
-    background: '#333',
-  })
-
-  const urls = documents.map((document) =>
-    URL.createObjectURL(base64ToBlob(document.content)),
-  )
-  urls.forEach((url) => {
-    const frame = previewWindow.document.createElement('iframe')
-    frame.src = url
-    frame.title = 'Требование-накладная'
-    Object.assign(frame.style, {
-      display: 'block',
-      width: '100%',
-      height: '100vh',
-      border: '0',
-    })
-    previewWindow.document.body.append(frame)
-  })
-  previewWindow.addEventListener('beforeunload', () => {
-    urls.forEach((url) => URL.revokeObjectURL(url))
-  })
-}
-
 async function generateDocument() {
   documentError.value = ''
   if (!vehicleNumber.value.trim()) {
     documentError.value = 'Укажите номер техники.'
+    return
+  }
+
+  if (!props.responsibleEmployee) {
+    documentError.value = 'Выберите ответственное лицо за выдачу.'
+    return
+  }
+
+  const sourceTable = props.rows[0]?.__sourceTable
+  if (
+    !sourceTable ||
+    props.rows.some((row) => row.__sourceTable !== sourceTable) ||
+    props.responsibleEmployee.sourceTable !== sourceTable
+  ) {
+    documentError.value =
+      'Ответственное лицо не соответствует источнику выбранных компонентов.'
     return
   }
 
@@ -156,10 +140,21 @@ async function generateDocument() {
       body: JSON.stringify({
         date: documentDate.value,
         vehicleNumber: vehicleNumber.value.trim(),
+        sourceTable,
+        responsibleEmployee: {
+          firstName: props.responsibleEmployee.firstName,
+          patronymic: props.responsibleEmployee.patronymic,
+          lastName: props.responsibleEmployee.lastName,
+        },
         items: props.rows.map((row) => ({
           name: String(getRowValue(row, ['name', 'Наименование']) ?? ''),
           unit: String(getRowValue(row, ['unit', 'Ед.изм.', 'Ед. изм.']) ?? ''),
           quantity: Number(row.__quantity ?? 1),
+          availableQuantity: Number(
+            row.__availableQuantity ??
+              getRowValue(row, ['amount', 'Количество']) ??
+              0,
+          ),
         })),
       }),
     })
@@ -178,7 +173,10 @@ async function generateDocument() {
     }
 
     const result = await response.json()
-    renderDocuments(previewWindow, result.documents)
+    if (result.documents.length !== 1) {
+      throw new Error('Сервер вернул некорректное количество PDF-файлов.')
+    }
+    renderPdfDocument(previewWindow, result.documents[0])
   } catch (error) {
     previewWindow.close()
     documentError.value =

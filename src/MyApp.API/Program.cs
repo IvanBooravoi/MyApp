@@ -49,5 +49,7 @@ app.MapAdminUserEndpoints();
 app.MapProfessionEndpoints();
 app.MapTableViewEndpoints();
 app.MapComponentDocumentEndpoints();
+app.MapResponsibleEmployeeEndpoints();
+app.MapRequirementJournalEndpoints();
 
 app.Run();

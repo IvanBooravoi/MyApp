@@ -5,12 +5,18 @@ using MyApp.Application.DTO;
 namespace MyApp.Application.Services;
 
 public sealed class ComponentDocumentService(
-    IComponentDocumentRenderer renderer) : IComponentDocumentService
+    IComponentDocumentRenderer renderer,
+    IUserRepository userRepository,
+    IResponsibleEmployeeService responsibleEmployeeService,
+    IRequirementJournalRepository requirementJournalRepository) :
+    IComponentDocumentService
 {
     private const int MaximumItems = 100;
 
-    public ServiceResult<ComponentDocumentsResponse> Generate(
-        ComponentDocumentRequest request)
+    public async Task<ServiceResult<ComponentDocumentsResponse>> GenerateAsync(
+        ComponentDocumentRequest request,
+        Guid userId,
+        CancellationToken cancellationToken)
     {
         var errors = Validate(request);
         if (errors.Count > 0)
@@ -18,9 +24,38 @@ public sealed class ComponentDocumentService(
             return ServiceResult<ComponentDocumentsResponse>.Validation(errors);
         }
 
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<ComponentDocumentsResponse>.Unauthorized();
+        }
+
+        var responsibleEmployee = await responsibleEmployeeService.ResolveAsync(
+            request.SourceTable,
+            request.ResponsibleEmployee,
+            cancellationToken);
+        if (responsibleEmployee.Status != ServiceResultStatus.Success ||
+            responsibleEmployee.Value is null)
+        {
+            return new ServiceResult<ComponentDocumentsResponse>(
+                responsibleEmployee.Status,
+                Message: responsibleEmployee.Message,
+                Errors: responsibleEmployee.Errors);
+        }
+
         var normalizedRequest = request with
         {
             VehicleNumber = request.VehicleNumber.Trim(),
+            AuthorPosition = user.Profession.Name,
+            AuthorName = BuildAuthorName(
+                user.FirstName,
+                user.MiddleName,
+                user.LastName),
+            IssuerPosition = responsibleEmployee.Value.Profession,
+            IssuerName = BuildAuthorName(
+                responsibleEmployee.Value.FirstName,
+                responsibleEmployee.Value.Patronymic,
+                responsibleEmployee.Value.LastName),
             Items = request.Items
                 .Select(item => item with
                 {
@@ -29,9 +64,44 @@ public sealed class ComponentDocumentService(
                 })
                 .ToArray()
         };
+        var documents = renderer.Render(normalizedRequest);
+        var document = documents.Single();
+        await requirementJournalRepository.SaveAsync(
+            user.Id,
+            BuildFullName(user.FirstName, user.MiddleName, user.LastName),
+            BuildFullName(
+                responsibleEmployee.Value.FirstName,
+                responsibleEmployee.Value.Patronymic,
+                responsibleEmployee.Value.LastName),
+            normalizedRequest.VehicleNumber,
+            normalizedRequest.SourceTable,
+            normalizedRequest.Items,
+            document,
+            cancellationToken);
         return ServiceResult<ComponentDocumentsResponse>.Success(
-            new ComponentDocumentsResponse(renderer.Render(normalizedRequest)));
+            new ComponentDocumentsResponse(documents));
     }
+
+    private static string BuildAuthorName(
+        string firstName,
+        string middleName,
+        string lastName)
+    {
+        var initials = new[] { firstName, middleName }
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => $"{name.Trim()[0]}.");
+        return $"{string.Concat(initials)} {lastName.Trim()}".Trim();
+    }
+
+    private static string BuildFullName(
+        string firstName,
+        string middleName,
+        string lastName) =>
+        string.Join(
+            ' ',
+            new[] { lastName, firstName, middleName }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim()));
 
     private static Dictionary<string, string[]> Validate(
         ComponentDocumentRequest request)
@@ -40,6 +110,12 @@ public sealed class ComponentDocumentService(
         if (string.IsNullOrWhiteSpace(request.VehicleNumber))
         {
             errors[nameof(request.VehicleNumber)] = ["Укажите номер техники."];
+        }
+
+        if (request.ResponsibleEmployee is null)
+        {
+            errors[nameof(request.ResponsibleEmployee)] =
+                ["Выберите ответственное лицо за выдачу."];
         }
 
         if (request.Items.Count == 0)
@@ -70,6 +146,14 @@ public sealed class ComponentDocumentService(
         {
             errors[nameof(ComponentDocumentItem.Quantity)] =
                 ["Количество должно быть больше нуля."];
+        }
+
+        if (request.Items.Any(item =>
+                item.AvailableQuantity < 0 ||
+                item.Quantity > item.AvailableQuantity))
+        {
+            errors[nameof(ComponentDocumentItem.AvailableQuantity)] =
+                ["Количество к списанию не может превышать остаток."];
         }
 
         return errors;

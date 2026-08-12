@@ -13,6 +13,8 @@ public static class ApplicationRegistration
         services.AddScoped<IProfessionService, ProfessionService>();
         services.AddScoped<ITableViewService, TableViewService>();
         services.AddScoped<IComponentDocumentService, ComponentDocumentService>();
+        services.AddScoped<IResponsibleEmployeeService, ResponsibleEmployeeService>();
+        services.AddScoped<IRequirementJournalService, RequirementJournalService>();
         return services;
     }
 }

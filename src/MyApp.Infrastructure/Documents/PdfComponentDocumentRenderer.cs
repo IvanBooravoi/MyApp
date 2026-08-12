@@ -27,23 +27,42 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
                 _templatePath);
         }
 
-        var documents = new List<GeneratedPdfDocument>();
         var chunks = request.Items.Chunk(ItemsPerDocument).ToArray();
-        for (var documentIndex = 0; documentIndex < chunks.Length; documentIndex++)
+        using var document = PdfReader.Open(
+            _templatePath,
+            PdfDocumentOpenMode.Modify);
+        FillDocument(document, request, chunks[0]);
+
+        for (var pageIndex = 1; pageIndex < chunks.Length; pageIndex++)
         {
-            using var template = PdfReader.Open(
+            using var pageDocument = PdfReader.Open(
                 _templatePath,
                 PdfDocumentOpenMode.Modify);
-            FillDocument(template, request, chunks[documentIndex]);
+            FillDocument(pageDocument, request, chunks[pageIndex]);
+            RenameFields(pageDocument, pageIndex + 1);
 
-            using var output = new MemoryStream();
-            template.Save(output, false);
-            documents.Add(new GeneratedPdfDocument(
-                $"components-{request.Date:yyyy-MM-dd}-{documentIndex + 1}.pdf",
-                output.ToArray()));
+            using var pageStream = new MemoryStream();
+            pageDocument.Save(pageStream, false);
+            pageStream.Position = 0;
+            using var importedPageDocument = PdfReader.Open(
+                pageStream,
+                PdfDocumentOpenMode.Import);
+            foreach (var sourcePage in importedPageDocument.Pages)
+            {
+                var importedPage = document.AddPage(sourcePage);
+                RegisterPageFields(document, importedPage);
+            }
         }
 
-        return documents;
+        document.AcroForm?.Elements.SetBoolean("/NeedAppearances", true);
+        using var output = new MemoryStream();
+        document.Save(output, false);
+        return
+        [
+            new GeneratedPdfDocument(
+                $"components-{request.Date:yyyy-MM-dd}.pdf",
+                output.ToArray())
+        ];
     }
 
     private static void FillDocument(
@@ -59,6 +78,11 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
 
         SetText(document, "date_n", request.Date.ToString("dd.MM.yyyy"));
         SetText(document, "car_n_1", request.VehicleNumber);
+        SetText(document, "job", "Аварийная");
+        SetText(document, "d_1", request.IssuerPosition);
+        SetText(document, "f_1", request.IssuerName);
+        SetText(document, "d_2", request.AuthorPosition);
+        SetText(document, "f_2", request.AuthorName);
 
         for (var index = 0; index < ItemsPerDocument; index++)
         {
@@ -131,13 +155,86 @@ public sealed class PdfComponentDocumentRenderer : IComponentDocumentRenderer
         return null;
     }
 
-    private static PdfDictionary? ResolveDictionary(PdfItem item) =>
+    private static PdfDictionary? ResolveDictionary(PdfItem? item) =>
         item switch
         {
             PdfDictionary dictionary => dictionary,
             PdfReference reference => reference.Value as PdfDictionary,
             _ => null
         };
+
+    private static void RenameFields(
+        PdfDocument document,
+        int pageNumber)
+    {
+        var fields = document.AcroForm?.Elements.GetArray("/Fields");
+        if (fields is not null)
+        {
+            RenameFields(fields, pageNumber);
+        }
+    }
+
+    private static void RenameFields(
+        PdfArray fields,
+        int pageNumber)
+    {
+        foreach (var item in fields.Elements)
+        {
+            var field = ResolveDictionary(item);
+            if (field is null)
+            {
+                continue;
+            }
+
+            var name = field.Elements.GetString("/T");
+            if (!string.IsNullOrEmpty(name))
+            {
+                field.Elements.SetString("/T", $"{name}_page_{pageNumber}");
+            }
+
+            var children = field.Elements.GetArray("/Kids");
+            if (children is not null)
+            {
+                RenameFields(children, pageNumber);
+            }
+        }
+    }
+
+    private static void RegisterPageFields(
+        PdfDocument document,
+        PdfPage page)
+    {
+        var formFields = document.AcroForm?.Elements.GetArray("/Fields");
+        var annotations = page.Elements.GetArray("/Annots");
+        if (formFields is null || annotations is null)
+        {
+            return;
+        }
+
+        var registeredIds = formFields.Elements
+            .OfType<PdfReference>()
+            .Select(reference => reference.ObjectID)
+            .ToHashSet();
+        foreach (var annotationItem in annotations.Elements)
+        {
+            var field = ResolveDictionary(annotationItem);
+            if (field is null)
+            {
+                continue;
+            }
+
+            while (ResolveDictionary(field.Elements["/Parent"]) is { } parent)
+            {
+                field = parent;
+            }
+
+            var reference = field.Reference;
+            if (reference is not null && registeredIds.Add(reference.ObjectID))
+            {
+                formFields.Elements.Add(reference);
+            }
+        }
+    }
 
     private static void RemoveAppearance(PdfDictionary field)
     {

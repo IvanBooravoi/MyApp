@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 using MyApp.Application.DTO;
 using MyApp.Application.Services;
 using PdfSharp.Pdf.IO;
@@ -9,13 +11,25 @@ public static class ComponentDocumentEndpoints
     public static IEndpointRouteBuilder MapComponentDocumentEndpoints(
         this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/documents/components", (
+        endpoints.MapPost("/api/documents/components", async (
             ComponentDocumentRequest request,
-            IComponentDocumentService documentService) =>
+            IComponentDocumentService documentService,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
         {
             try
             {
-                var result = documentService.Generate(request);
+                var userIdValue = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+                if (!Guid.TryParse(userIdValue, out var userId))
+                {
+                    return Results.Unauthorized();
+                }
+
+                var result = await documentService.GenerateAsync(
+                    request,
+                    userId,
+                    cancellationToken);
                 return result.ToHttpResult(Results.Ok);
             }
             catch (FileNotFoundException exception)

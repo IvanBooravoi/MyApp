@@ -938,6 +938,163 @@ button {
   gap: 12px;
 }
 
+.responsible-employee-field {
+  margin-bottom: 16px;
+}
+
+.responsible-employee-field label {
+  display: flex;
+  max-width: 520px;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.responsible-employee-field label span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.responsible-employee-field select {
+  width: 100%;
+  height: 42px;
+  padding: 0 36px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-surface);
+}
+
+.responsible-employee-field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.requirements-journal-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.requirements-journal-filters {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.7fr) repeat(2, minmax(220px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.requirements-journal-filters label {
+  display: grid;
+  gap: 7px;
+}
+
+.requirements-journal-filters label span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.requirements-journal-filters input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-surface);
+}
+
+.requirements-journal-filters input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+@media (max-width: 1100px) {
+  .requirements-journal-filters {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .requirements-journal-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+.requirements-journal-table table {
+  min-width: 1250px;
+}
+
+.requirements-journal-table th:first-child,
+.requirements-journal-table td:first-child {
+  width: 180px;
+}
+
+.requirements-journal-table th:nth-child(2),
+.requirements-journal-table td:nth-child(2) {
+  width: 220px;
+}
+
+.requirements-journal-table th:nth-child(3),
+.requirements-journal-table td:nth-child(3) {
+  width: 220px;
+}
+
+.requirements-journal-table th:nth-child(4),
+.requirements-journal-table td:nth-child(4) {
+  width: 150px;
+}
+
+.requirements-journal-table th:last-child,
+.requirements-journal-table td:last-child {
+  width: 190px;
+}
+
+.requirements-date {
+  white-space: nowrap;
+}
+
+.requirement-items {
+  display: grid;
+  gap: 8px;
+}
+
+.requirement-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.requirement-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.requirement-item-name {
+  color: var(--text-main);
+}
+
+.requirement-item-value {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.requirements-row-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.requirements-row-actions button {
+  width: 100%;
+}
+
 .worker-filters label {
   display: flex;
   flex-direction: column;

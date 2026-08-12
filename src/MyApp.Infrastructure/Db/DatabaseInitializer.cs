@@ -115,7 +115,66 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
             $$;
             """,
             cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS component_requirements (
+                id uuid PRIMARY KEY,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                created_by uuid NOT NULL,
+                author_name varchar(300) NOT NULL,
+                issuer_name varchar(300) NOT NULL,
+                vehicle_number varchar(100) NOT NULL,
+                source_table varchar(20) NOT NULL,
+                pdf_file_name varchar(200) NOT NULL,
+                pdf_content bytea NOT NULL,
+                CONSTRAINT fk_component_requirements_created_by
+                    FOREIGN KEY (created_by) REFERENCES app_users(id)
+                    ON DELETE RESTRICT
+            );
 
+            CREATE TABLE IF NOT EXISTS component_requirement_items (
+                requirement_id uuid NOT NULL,
+                position integer NOT NULL,
+                name text NOT NULL,
+                unit varchar(100) NOT NULL,
+                quantity numeric NOT NULL,
+                PRIMARY KEY (requirement_id, position),
+                CONSTRAINT fk_component_requirement_items_requirement
+                    FOREIGN KEY (requirement_id)
+                    REFERENCES component_requirements(id)
+                    ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_component_requirements_created_at
+                ON component_requirements (created_at DESC);
+
+            ALTER TABLE component_requirements
+                ADD COLUMN IF NOT EXISTS issuer_name varchar(300) NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS source_table varchar(20) NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS pdf_file_name varchar(200) NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS pdf_content bytea;
+
+            UPDATE component_requirements AS requirements
+            SET source_table = CASE
+                WHEN LOWER(employees."Profession") = LOWER('Кладовщик')
+                    THEN 'full_ost'
+                WHEN LOWER(employees."Profession") = LOWER('Старший механик')
+                    THEN 'meh_ost'
+                ELSE requirements.source_table
+            END
+            FROM employees
+            WHERE requirements.source_table = ''
+              AND REGEXP_REPLACE(
+                    BTRIM(employees."FullName"),
+                    '\s+',
+                    ' ',
+                    'g') = REGEXP_REPLACE(
+                        BTRIM(requirements.issuer_name),
+                        '\s+',
+                        ' ',
+                        'g');
+            """,
+            cancellationToken);
         var administratorProfession = await db.Professions.FirstOrDefaultAsync(
             profession => profession.Name == "Администратор",
             cancellationToken);

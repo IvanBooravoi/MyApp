@@ -169,6 +169,18 @@ function toggleSettings() {
         </button>
       </div>
       <button
+        class="nav-link"
+        :class="{ 'nav-link--active': activePage === 'requirements' }"
+        type="button"
+        :aria-current="activePage === 'requirements' ? 'page' : undefined"
+        @click="$emit('navigate', 'requirements')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 3h9l3 3v15H6V3Zm9 0v4h4M9 11h6M9 15h6" />
+        </svg>
+        <span class="sidebar-label">Выписанные требования</span>
+      </button>
+      <button
         v-if="isAdmin"
         class="nav-link"
         :class="{ 'nav-link--active': activePage === 'settings' }"

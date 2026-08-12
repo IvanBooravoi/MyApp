@@ -25,6 +25,8 @@ public static class InfrastructureRegistration
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IProfessionRepository, ProfessionRepository>();
         services.AddScoped<ITableViewRepository, TableViewRepository>();
+        services.AddScoped<IResponsibleEmployeeRepository, ResponsibleEmployeeRepository>();
+        services.AddScoped<IRequirementJournalRepository, RequirementJournalRepository>();
         services.AddScoped<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddScoped<ITokenProvider, JwtTokenProvider>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
