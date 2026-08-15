@@ -13,7 +13,9 @@ namespace MyApp.API.Extensions
 
             foreach (var impl in repos)
             {
-                var iface = impl.GetInterfaces().FirstOrDefault();
+                // Filter to get only repository interfaces (I*Repository)
+                var iface = impl.GetInterfaces()
+                    .FirstOrDefault(i => i.Name.StartsWith("I") && i.Name.EndsWith("Repository"));
                 if (iface != null)
                 {
                     services.AddScoped(iface, impl);
