@@ -38,6 +38,11 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
             "Caterpillar 140")
     ];
 
+    static VehicleService()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     public Task<IReadOnlyList<VehicleResponse>> GetVehiclesAsync(
         CancellationToken cancellationToken) =>
         repository.GetVehiclesAsync(cancellationToken);
