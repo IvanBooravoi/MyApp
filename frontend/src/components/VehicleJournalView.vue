@@ -76,7 +76,6 @@ const latestHours = computed(() => {
 })
 const defectCount = computed(() => journal.value?.defects?.length ?? 0)
 
-watch(selectedVehicleId, () => loadJournal())
 onMounted(loadVehicles)
 onBeforeUnmount(closePhoto)
 
@@ -130,12 +129,13 @@ async function loadVehicles() {
     chooseVehicle(matches[0])
   }
 
-  function chooseVehicle(vehicle) {
+  async function chooseVehicle(vehicle) {
     vehicleSearchMatches.value = []
     errorMessage.value = ''
     vehicleQuery.value = vehicle.stateNumber ||
       String(vehicle.garageNumber ?? '')
     selectedVehicleId.value = vehicle.id
+    await loadJournal()
   }
 
   function normalizeVehicleNumber(value) {
