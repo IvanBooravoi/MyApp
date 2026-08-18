@@ -10,8 +10,8 @@ public sealed class TableViewRepository(
     private static readonly HashSet<string> AllowedViews =
         new(StringComparer.Ordinal)
         {
-            "full_ost",
-            "meh_ost",
+            "v_full_ost",
+            "v_meh_ost",
             "v_workers"
         };
 
@@ -72,8 +72,19 @@ public sealed class TableViewRepository(
             StringComparison.OrdinalIgnoreCase)
             ? string.Empty
             : " LIMIT @limit OFFSET @offset";
+        var selectClause = request.TableName == "v_workers" &&
+                           request.IncludeSignatures
+            ? """
+              SELECT t.*, (signatures.last_name IS NOT NULL) AS "Роспись"
+              FROM v_workers AS t
+              LEFT JOIN employee_signatures AS signatures
+                ON signatures.last_name = t."LastName"
+               AND signatures.first_name = t."FirstName"
+               AND signatures.patronymic = COALESCE(t."Patronymic", '')
+              """
+            : $"SELECT * FROM {request.TableName} AS t";
         await using var command = dataSource.CreateCommand(
-            $"SELECT * FROM {request.TableName} AS t{whereClause}" +
+            $"{selectClause}{whereClause}" +
             $" ORDER BY row_to_json(t)::text{pagingClause}");
         AddParameters(command, filters);
 

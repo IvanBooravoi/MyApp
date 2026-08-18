@@ -20,6 +20,10 @@ namespace MyApp.Infrastructure.Db {
                 entity.Property(x => x.PositionId).HasColumnName("position").IsRequired();
                 entity.Property(x => x.Role).HasColumnName("role").IsRequired().HasMaxLength(30);
                 entity.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
+                entity.Property(x => x.AvatarContent).HasColumnName("avatar_content");
+                entity.Property(x => x.AvatarContentType)
+                    .HasColumnName("avatar_content_type")
+                    .HasMaxLength(100);
                 entity.HasIndex(x => x.Email).IsUnique();
                 entity.HasIndex(x => x.UserName).IsUnique();
                 entity.HasOne(x => x.Profession)

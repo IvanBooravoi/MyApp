@@ -7,6 +7,9 @@ public sealed record ComponentDocumentRequest(
     ResponsibleEmployeeSelection ResponsibleEmployee,
     IReadOnlyList<ComponentDocumentItem> Items)
 {
+    public IReadOnlyList<string> VehicleNumbers { get; init; } = [];
+    public IReadOnlyList<IReadOnlyList<ComponentDocumentItem>> Pages { get; init; } = [];
+    public string JobName { get; init; } = "Аварийная";
     public string AuthorPosition { get; init; } = string.Empty;
     public string AuthorName { get; init; } = string.Empty;
     public string IssuerPosition { get; init; } = string.Empty;
@@ -19,9 +22,5 @@ public sealed record ComponentDocumentItem(
     decimal Quantity,
     decimal AvailableQuantity);
 
-public sealed record GeneratedPdfDocument(
-    string FileName,
-    byte[] Content);
-
-public sealed record ComponentDocumentsResponse(
-    IReadOnlyList<GeneratedPdfDocument> Documents);
+public sealed record ComponentDocumentResponse(
+    ComponentDocumentRequest Document);

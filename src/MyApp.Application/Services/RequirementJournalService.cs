@@ -10,10 +10,10 @@ public sealed class RequirementJournalService(
         CancellationToken cancellationToken) =>
         repository.GetRecentAsync(cancellationToken);
 
-    public Task<GeneratedPdfDocument?> GetPdfAsync(
+    public Task<ComponentDocumentRequest?> GetDocumentAsync(
         Guid id,
         CancellationToken cancellationToken) =>
-        repository.GetPdfAsync(id, cancellationToken);
+        repository.GetDocumentRequestAsync(id, cancellationToken);
 
     public Task<bool> DeleteAsync(
         Guid id,

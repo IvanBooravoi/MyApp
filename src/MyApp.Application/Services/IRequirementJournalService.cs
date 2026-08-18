@@ -7,7 +7,7 @@ public interface IRequirementJournalService
     Task<IReadOnlyList<RequirementJournalEntry>> GetRecentAsync(
         CancellationToken cancellationToken);
 
-    Task<GeneratedPdfDocument?> GetPdfAsync(
+    Task<ComponentDocumentRequest?> GetDocumentAsync(
         Guid id,
         CancellationToken cancellationToken);
 

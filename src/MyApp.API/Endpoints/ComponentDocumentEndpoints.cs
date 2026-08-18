@@ -2,7 +2,6 @@ using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
 using MyApp.Application.DTO;
 using MyApp.Application.Services;
-using PdfSharp.Pdf.IO;
 
 namespace MyApp.API.Endpoints;
 
@@ -11,64 +10,68 @@ public static class ComponentDocumentEndpoints
     public static IEndpointRouteBuilder MapComponentDocumentEndpoints(
         this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapPost("/api/documents/components/preview", async (
+            ComponentDocumentRequest request,
+            IComponentDocumentService documentService,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var result = await documentService.PrepareAsync(
+                request,
+                userId,
+                cancellationToken);
+            return result.ToHttpResult(Results.Ok);
+        }).RequireAuthorization();
+
         endpoints.MapPost("/api/documents/components", async (
             ComponentDocumentRequest request,
             IComponentDocumentService documentService,
             ClaimsPrincipal principal,
             CancellationToken cancellationToken) =>
         {
-            try
+            if (!TryGetUserId(principal, out var userId))
             {
-                var userIdValue = principal.FindFirstValue(ClaimTypes.NameIdentifier)
-                    ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
-                if (!Guid.TryParse(userIdValue, out var userId))
-                {
-                    return Results.Unauthorized();
-                }
+                return Results.Unauthorized();
+            }
 
-                var result = await documentService.GenerateAsync(
-                    request,
-                    userId,
-                    cancellationToken);
-                return result.ToHttpResult(Results.Ok);
-            }
-            catch (FileNotFoundException exception)
+            var result = await documentService.GenerateAsync(
+                request,
+                userId,
+                cancellationToken);
+            return result.ToHttpResult(Results.Ok);
+        }).RequireAuthorization();
+
+        endpoints.MapGet("/api/documents/components/template", (
+            IConfiguration configuration) =>
+        {
+            var templatePath = configuration.GetValue<string>(
+                "DocumentTemplates:ComponentIssuePath");
+            if (string.IsNullOrWhiteSpace(templatePath) ||
+                !File.Exists(templatePath))
             {
-                return Results.Problem(
-                    exception.Message,
-                    statusCode: StatusCodes.Status500InternalServerError,
-                    title: "Файл для формирования PDF не найден");
+                return Results.NotFound();
             }
-            catch (InvalidDataException exception)
-            {
-                return Results.Problem(
-                    exception.Message,
-                    statusCode: StatusCodes.Status500InternalServerError,
-                    title: "Некорректный PDF-шаблон");
-            }
-            catch (PdfReaderException exception)
-            {
-                return Results.Problem(
-                    exception.Message,
-                    statusCode: StatusCodes.Status500InternalServerError,
-                    title: "Не удалось прочитать PDF-шаблон");
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                return Results.Problem(
-                    exception.Message,
-                    statusCode: StatusCodes.Status500InternalServerError,
-                    title: "Нет доступа к PDF-шаблону");
-            }
-            catch (IOException exception)
-            {
-                return Results.Problem(
-                    exception.Message,
-                    statusCode: StatusCodes.Status500InternalServerError,
-                    title: "Ошибка чтения или записи PDF");
-            }
+
+            return Results.File(
+                templatePath,
+                "application/pdf",
+                enableRangeProcessing: false);
         }).RequireAuthorization();
 
         return endpoints;
+    }
+
+    private static bool TryGetUserId(
+        ClaimsPrincipal principal,
+        out Guid userId)
+    {
+        var userIdValue = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+        return Guid.TryParse(userIdValue, out userId);
     }
 }

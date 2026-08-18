@@ -60,8 +60,8 @@ public sealed class ResponsibleEmployeeService(
     private static string? GetProfession(string sourceTable) =>
         sourceTable.ToLowerInvariant() switch
         {
-            "full_ost" => "Кладовщик",
-            "meh_ost" => "Старший механик",
+            "v_full_ost" or "full_ost" => "Кладовщик",
+            "v_meh_ost" or "meh_ost" => "Старший механик",
             _ => null
         };
 }

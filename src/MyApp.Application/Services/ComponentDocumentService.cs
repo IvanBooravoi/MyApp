@@ -5,29 +5,54 @@ using MyApp.Application.DTO;
 namespace MyApp.Application.Services;
 
 public sealed class ComponentDocumentService(
-    IComponentDocumentRenderer renderer,
     IUserRepository userRepository,
     IResponsibleEmployeeService responsibleEmployeeService,
-    IRequirementJournalRepository requirementJournalRepository) :
+    IRequirementJournalRepository requirementJournalRepository,
+    IMaterialGroupService materialGroupService) :
     IComponentDocumentService
 {
     private const int MaximumItems = 100;
 
-    public async Task<ServiceResult<ComponentDocumentsResponse>> GenerateAsync(
+    public Task<ServiceResult<ComponentDocumentResponse>> PrepareAsync(
         ComponentDocumentRequest request,
         Guid userId,
+        CancellationToken cancellationToken) =>
+        ProcessAsync(request, userId, false, cancellationToken);
+
+    public Task<ServiceResult<ComponentDocumentResponse>> GenerateAsync(
+        ComponentDocumentRequest request,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        ProcessAsync(request, userId, true, cancellationToken);
+
+    private async Task<ServiceResult<ComponentDocumentResponse>> ProcessAsync(
+        ComponentDocumentRequest request,
+        Guid userId,
+        bool saveRequirement,
         CancellationToken cancellationToken)
     {
         var errors = Validate(request);
         if (errors.Count > 0)
         {
-            return ServiceResult<ComponentDocumentsResponse>.Validation(errors);
+            return ServiceResult<ComponentDocumentResponse>.Validation(errors);
+        }
+
+        var materialGroupMappings = await materialGroupService.GetMappingsAsync(
+            request.SourceTable,
+            cancellationToken);
+        if (materialGroupMappings.Status != ServiceResultStatus.Success ||
+            materialGroupMappings.Value is null)
+        {
+            return new ServiceResult<ComponentDocumentResponse>(
+                materialGroupMappings.Status,
+                Message: materialGroupMappings.Message,
+                Errors: materialGroupMappings.Errors);
         }
 
         var user = await userRepository.FindByIdAsync(userId, cancellationToken);
         if (user is null)
         {
-            return ServiceResult<ComponentDocumentsResponse>.Unauthorized();
+            return ServiceResult<ComponentDocumentResponse>.Unauthorized();
         }
 
         var responsibleEmployee = await responsibleEmployeeService.ResolveAsync(
@@ -37,15 +62,31 @@ public sealed class ComponentDocumentService(
         if (responsibleEmployee.Status != ServiceResultStatus.Success ||
             responsibleEmployee.Value is null)
         {
-            return new ServiceResult<ComponentDocumentsResponse>(
+            return new ServiceResult<ComponentDocumentResponse>(
                 responsibleEmployee.Status,
                 Message: responsibleEmployee.Message,
                 Errors: responsibleEmployee.Errors);
         }
 
+        var normalizedItems = request.Items
+            .Select(item => item with
+            {
+                Name = item.Name.Trim(),
+                Unit = item.Unit.Trim()
+            })
+            .ToArray();
+        var layout = BuildDocumentLayout(
+            normalizedItems,
+            NormalizeVehicleNumbers(request.VehicleNumber, normalizedItems.Length),
+            materialGroupMappings.Value);
         var normalizedRequest = request with
         {
             VehicleNumber = request.VehicleNumber.Trim(),
+            JobName = string.IsNullOrWhiteSpace(request.JobName)
+                ? "Аварийная"
+                : request.JobName.Trim(),
+            VehicleNumbers = layout.VehicleNumbers,
+            Pages = layout.Pages,
             AuthorPosition = user.Profession.Name,
             AuthorName = BuildAuthorName(
                 user.FirstName,
@@ -56,30 +97,22 @@ public sealed class ComponentDocumentService(
                 responsibleEmployee.Value.FirstName,
                 responsibleEmployee.Value.Patronymic,
                 responsibleEmployee.Value.LastName),
-            Items = request.Items
-                .Select(item => item with
-                {
-                    Name = item.Name.Trim(),
-                    Unit = item.Unit.Trim()
-                })
-                .ToArray()
+            Items = layout.Items
         };
-        var documents = renderer.Render(normalizedRequest);
-        var document = documents.Single();
-        await requirementJournalRepository.SaveAsync(
-            user.Id,
-            BuildFullName(user.FirstName, user.MiddleName, user.LastName),
-            BuildFullName(
-                responsibleEmployee.Value.FirstName,
-                responsibleEmployee.Value.Patronymic,
-                responsibleEmployee.Value.LastName),
-            normalizedRequest.VehicleNumber,
-            normalizedRequest.SourceTable,
-            normalizedRequest.Items,
-            document,
-            cancellationToken);
-        return ServiceResult<ComponentDocumentsResponse>.Success(
-            new ComponentDocumentsResponse(documents));
+        if (saveRequirement)
+        {
+            await requirementJournalRepository.SaveAsync(
+                user.Id,
+                BuildFullName(user.FirstName, user.MiddleName, user.LastName),
+                BuildFullName(
+                    responsibleEmployee.Value.FirstName,
+                    responsibleEmployee.Value.Patronymic,
+                    responsibleEmployee.Value.LastName),
+                normalizedRequest,
+                cancellationToken);
+        }
+        return ServiceResult<ComponentDocumentResponse>.Success(
+            new ComponentDocumentResponse(normalizedRequest));
     }
 
     private static string BuildAuthorName(
@@ -103,6 +136,102 @@ public sealed class ComponentDocumentService(
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .Select(value => value.Trim()));
 
+    private static IReadOnlyList<string> NormalizeVehicleNumbers(
+        string vehicleNumber,
+        int itemCount)
+    {
+        var values = ParseVehicleNumbers(vehicleNumber);
+        if (values.Length <= 1)
+        {
+            return values;
+        }
+
+        return Enumerable.Range(0, itemCount)
+            .Select(index => values[Math.Min(index, values.Length - 1)])
+            .ToArray();
+    }
+
+    private static DocumentLayout BuildDocumentLayout(
+        IReadOnlyList<ComponentDocumentItem> items,
+        IReadOnlyList<string> vehicleNumbers,
+        IReadOnlyList<MaterialGroupMappingResponse> mappings)
+    {
+        var mappingByName = mappings.ToDictionary(
+            mapping => mapping.MaterialName.Trim(),
+            StringComparer.Ordinal);
+        var groups = new Dictionary<Guid, List<IndexedDocumentItem>>();
+        var groupOrder = new List<Guid>();
+        var ungrouped = new List<IndexedDocumentItem>();
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var indexedItem = new IndexedDocumentItem(
+                items[index],
+                vehicleNumbers.Count > 1 ? vehicleNumbers[index] : null);
+            if (!mappingByName.TryGetValue(items[index].Name, out var mapping))
+            {
+                ungrouped.Add(indexedItem);
+                continue;
+            }
+
+            if (!groups.TryGetValue(mapping.GroupId, out var groupItems))
+            {
+                groupItems = [];
+                groups[mapping.GroupId] = groupItems;
+                groupOrder.Add(mapping.GroupId);
+            }
+            groupItems.Add(indexedItem);
+        }
+
+        var pages = new List<IReadOnlyList<ComponentDocumentItem>>();
+        var orderedItems = new List<ComponentDocumentItem>(items.Count);
+        var orderedVehicleNumbers = new List<string>(items.Count);
+
+        foreach (var groupId in groupOrder)
+        {
+            AddPages(
+                groups[groupId],
+                pages,
+                orderedItems,
+                orderedVehicleNumbers);
+        }
+        AddPages(ungrouped, pages, orderedItems, orderedVehicleNumbers);
+
+        return new DocumentLayout(
+            orderedItems,
+            vehicleNumbers.Count > 1
+                ? orderedVehicleNumbers
+                : vehicleNumbers,
+            pages);
+    }
+
+    private static void AddPages(
+        IReadOnlyList<IndexedDocumentItem> items,
+        ICollection<IReadOnlyList<ComponentDocumentItem>> pages,
+        ICollection<ComponentDocumentItem> orderedItems,
+        ICollection<string> orderedVehicleNumbers)
+    {
+        foreach (var chunk in items.Chunk(5))
+        {
+            var page = chunk.Select(entry => entry.Item).ToArray();
+            pages.Add(page);
+            foreach (var entry in chunk)
+            {
+                orderedItems.Add(entry.Item);
+                if (entry.VehicleNumber is not null)
+                {
+                    orderedVehicleNumbers.Add(entry.VehicleNumber);
+                }
+            }
+        }
+    }
+
+    private static string[] ParseVehicleNumbers(string value) =>
+        value.Split(
+            ';',
+            StringSplitOptions.RemoveEmptyEntries |
+            StringSplitOptions.TrimEntries);
+
     private static Dictionary<string, string[]> Validate(
         ComponentDocumentRequest request)
     {
@@ -110,6 +239,17 @@ public sealed class ComponentDocumentService(
         if (string.IsNullOrWhiteSpace(request.VehicleNumber))
         {
             errors[nameof(request.VehicleNumber)] = ["Укажите номер техники."];
+        }
+
+        var vehicleNumbers = ParseVehicleNumbers(request.VehicleNumber);
+        if (vehicleNumbers.Length == 0)
+        {
+            errors[nameof(request.VehicleNumber)] = ["Укажите номер техники."];
+        }
+        else if (vehicleNumbers.Length > request.Items.Count)
+        {
+            errors[nameof(request.VehicleNumber)] =
+                ["Количество номеров техники не должно превышать количество наименований."];
         }
 
         if (request.ResponsibleEmployee is null)
@@ -128,6 +268,12 @@ public sealed class ComponentDocumentService(
         {
             errors[nameof(request.Items)] =
                 [$"Можно сформировать не более {MaximumItems} компонентов за один раз."];
+        }
+
+        if (request.JobName?.Trim().Length > 100)
+        {
+            errors[nameof(request.JobName)] =
+                ["Наименование ТО не должно превышать 100 символов."];
         }
 
         if (request.Items.Any(item => string.IsNullOrWhiteSpace(item.Name)))
@@ -158,4 +304,13 @@ public sealed class ComponentDocumentService(
 
         return errors;
     }
+
+    private sealed record IndexedDocumentItem(
+        ComponentDocumentItem Item,
+        string? VehicleNumber);
+
+    private sealed record DocumentLayout(
+        IReadOnlyList<ComponentDocumentItem> Items,
+        IReadOnlyList<string> VehicleNumbers,
+        IReadOnlyList<IReadOnlyList<ComponentDocumentItem>> Pages);
 }

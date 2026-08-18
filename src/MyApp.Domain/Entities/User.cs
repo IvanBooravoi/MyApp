@@ -12,5 +12,7 @@ namespace MyApp.Domain.Entities {
         public Profession Profession { get; set; } = null!;
         public required string Role { get; set; }
         public DateTime CreatedAt { get; set; }
+        public byte[]? AvatarContent { get; set; }
+        public string? AvatarContentType { get; set; }
     }
 }

@@ -8,7 +8,8 @@ public sealed record TableViewRequest(
     string? LastName,
     string? FirstName,
     string? Patronymic,
-    string? Profession);
+    string? Profession,
+    bool IncludeSignatures);
 
 public sealed record TableViewResponse(
     IReadOnlyList<string> Columns,

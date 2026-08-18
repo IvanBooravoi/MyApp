@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { renderPdfDocument } from '../utils/pdfPreview'
+import { createPdfDocument, renderPdfDocument } from '../utils/pdfPreview'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -125,7 +126,7 @@ async function openPdf(requirement) {
   previewWindow.document.body.textContent = 'Формирование PDF...'
   activePdfId.value = requirement.id
   try {
-    const response = await fetch(`/api/requirements/${requirement.id}/pdf`, {
+    const response = await fetch(`/api/requirements/${requirement.id}/document`, {
       headers: {
         Authorization: `Bearer ${props.token}`,
       },
@@ -133,7 +134,10 @@ async function openPdf(requirement) {
     if (!response.ok) {
       throw new Error('Не удалось сформировать PDF.')
     }
-    renderPdfDocument(previewWindow, await response.json())
+    renderPdfDocument(
+      previewWindow,
+      await createPdfDocument(await response.json(), props.token),
+    )
   } catch (error) {
     previewWindow.close()
     errorMessage.value =
@@ -186,7 +190,7 @@ onMounted(loadRequirements)
         <p class="eyebrow">ЖУРНАЛ</p>
         <h1>Выписанные требования</h1>
       </div>
-      <div class="user-avatar" aria-label="Профиль пользователя">П</div>
+      <UserAvatar :token="token" />
     </header>
 
     <section class="data-table-panel macos-glass-panel">
@@ -260,11 +264,13 @@ onMounted(loadRequirements)
           </thead>
           <tbody>
             <tr v-for="requirement in filteredRequirements" :key="requirement.id">
-              <td class="requirements-date">{{ formatDateTime(requirement.createdAt) }}</td>
-              <td>{{ requirement.authorName }}</td>
-              <td>{{ requirement.issuerName }}</td>
-              <td>{{ requirement.vehicleNumber }}</td>
-              <td>
+              <td class="requirements-date" data-label="Дата и время">
+                {{ formatDateTime(requirement.createdAt) }}
+              </td>
+              <td data-label="Кто создал">{{ requirement.authorName }}</td>
+              <td data-label="Кто выдал">{{ requirement.issuerName }}</td>
+              <td data-label="Номер техники">{{ requirement.vehicleNumber }}</td>
+              <td data-label="Материалы">
                 <div class="requirement-items">
                   <div
                     v-for="(item, index) in requirement.items"
@@ -278,7 +284,7 @@ onMounted(loadRequirements)
                   </div>
                 </div>
               </td>
-              <td>
+              <td data-label="Действия">
                 <div class="requirements-row-actions">
                   <button
                     class="secondary-button"

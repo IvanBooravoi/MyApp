@@ -1,7 +1,13 @@
 <script setup>
+import UserAvatar from './UserAvatar.vue'
+
 defineProps({
   navigationCollapsed: {
     type: Boolean,
+    required: true,
+  },
+  token: {
+    type: String,
     required: true,
   },
 })
@@ -14,7 +20,7 @@ defineProps({
         <p class="eyebrow">ОБЗОР</p>
         <h1>Главная</h1>
       </div>
-      <div class="user-avatar" aria-label="Профиль пользователя">П</div>
+      <UserAvatar :token="token" />
     </header>
 
     <section class="welcome-card">

@@ -150,6 +150,129 @@ public sealed class UserService(
             new UpdateUserResponse(user.Id));
     }
 
+    public async Task<ServiceResult<UserProfileResponse>> GetProfileAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(id, cancellationToken);
+        return user is null
+            ? ServiceResult<UserProfileResponse>.NotFound()
+            : ServiceResult<UserProfileResponse>.Success(ToProfile(user));
+    }
+
+    public async Task<ServiceResult<UserProfileResponse>> UpdateProfileAsync(
+        Guid id,
+        UpdateProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userName = request.UserName.Trim();
+        var errors = new Dictionary<string, string[]>();
+        if (userName.Length is < 3 or > 50)
+        {
+            errors[nameof(request.UserName)] =
+                ["Логин должен содержать от 3 до 50 символов."];
+        }
+        if (!string.IsNullOrEmpty(request.NewPassword) &&
+            request.NewPassword.Length < 6)
+        {
+            errors[nameof(request.NewPassword)] =
+                ["Новый пароль должен содержать не менее 6 символов."];
+        }
+        if (errors.Count > 0)
+        {
+            return ServiceResult<UserProfileResponse>.Validation(errors);
+        }
+
+        var user = await userRepository.FindByIdAsync(id, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<UserProfileResponse>.NotFound();
+        }
+        if (await userRepository.UserNameExistsAsync(
+                userName, id, cancellationToken))
+        {
+            return ServiceResult<UserProfileResponse>.Conflict(
+                "Пользователь с таким логином уже существует.");
+        }
+        if (!string.IsNullOrEmpty(request.NewPassword))
+        {
+            if (string.IsNullOrEmpty(request.CurrentPassword) ||
+                !passwordHasher.Verify(
+                    request.CurrentPassword,
+                    user.PasswordHash))
+            {
+                return ServiceResult<UserProfileResponse>.Validation(
+                    new Dictionary<string, string[]>
+                    {
+                        [nameof(request.CurrentPassword)] =
+                            ["Текущий пароль указан неверно."]
+                    });
+            }
+            user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        }
+
+        user.UserName = userName;
+        user.Email = $"{userName.ToLowerInvariant()}@local";
+        await userRepository.SaveChangesAsync(cancellationToken);
+        return ServiceResult<UserProfileResponse>.Success(ToProfile(user));
+    }
+
+    public async Task<ServiceResult<UserAvatarResponse>> GetAvatarAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(id, cancellationToken);
+        return user?.AvatarContent is null ||
+               string.IsNullOrWhiteSpace(user.AvatarContentType)
+            ? ServiceResult<UserAvatarResponse>.NotFound()
+            : ServiceResult<UserAvatarResponse>.Success(
+                new UserAvatarResponse(
+                    user.AvatarContent,
+                    user.AvatarContentType));
+    }
+
+    public async Task<ServiceResult<UserProfileResponse>> UpdateAvatarAsync(
+        Guid id,
+        byte[] content,
+        string contentType,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(id, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<UserProfileResponse>.NotFound();
+        }
+        user.AvatarContent = content;
+        user.AvatarContentType = contentType;
+        await userRepository.SaveChangesAsync(cancellationToken);
+        return ServiceResult<UserProfileResponse>.Success(ToProfile(user));
+    }
+
+    public async Task<ServiceResult<UserProfileResponse>> DeleteAvatarAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(id, cancellationToken);
+        if (user is null)
+        {
+            return ServiceResult<UserProfileResponse>.NotFound();
+        }
+        user.AvatarContent = null;
+        user.AvatarContentType = null;
+        await userRepository.SaveChangesAsync(cancellationToken);
+        return ServiceResult<UserProfileResponse>.Success(ToProfile(user));
+    }
+
+    private static UserProfileResponse ToProfile(User user) =>
+        new(
+            user.Id,
+            user.FirstName,
+            user.MiddleName,
+            user.LastName,
+            user.UserName,
+            user.Profession.Name,
+            user.AvatarContent is not null);
+
     private static Dictionary<string, string[]> ValidateCreateRequest(
         CreateUserRequest request)
     {

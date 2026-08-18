@@ -1,5 +1,6 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -31,8 +32,8 @@ const emit = defineEmits([
 ])
 
 const tables = [
-  { id: 'full_ost', name: 'Остатки на складе' },
-  { id: 'meh_ost', name: 'Остатки механиков' },
+  { id: 'v_full_ost', name: 'Остатки на складе' },
+  { id: 'v_meh_ost', name: 'Остатки механиков' },
   { id: 'v_workers', name: 'Работники' },
 ]
 
@@ -47,6 +48,7 @@ const isLoading = ref(false)
 const responsibleEmployees = ref([])
 const responsibleEmployeeError = ref('')
 const isLoadingResponsibleEmployees = ref(false)
+const signatureUrls = ref(new Map())
 const workerFilters = reactive({
   lastName: '',
   firstName: '',
@@ -69,10 +71,12 @@ const totalPages = computed(() => {
 
 const isWorkersTable = computed(() => props.selectedTableId === 'v_workers')
 const isSelectableTable = computed(
-  () => props.selectedTableId === 'full_ost' || props.selectedTableId === 'meh_ost',
+  () =>
+    props.selectedTableId === 'v_full_ost' ||
+    props.selectedTableId === 'v_meh_ost',
 )
 const responsibleProfession = computed(() =>
-  props.selectedTableId === 'full_ost' ? 'Кладовщик' : 'Старший механик',
+  props.selectedTableId === 'v_full_ost' ? 'Кладовщик' : 'Старший механик',
 )
 const selectedResponsibleKey = computed({
   get() {
@@ -109,12 +113,90 @@ const columnLabels = {
   name: 'Наименование',
   unit: 'Ед. изм.',
   amount: 'На остатке',
+  Количество: 'На остатке',
+  'Ед.изм.': 'Ед. изм.',
   price: 'Цена',
   LastName: 'Фамилия',
   FirstName: 'Имя',
   Patronymic: 'Отчество',
   PhoneNumber: 'Телефон',
   Profession: 'Профессия',
+  Роспись: 'Роспись',
+}
+
+function getWorkerKey(row) {
+  return JSON.stringify([row.LastName, row.FirstName, row.Patronymic ?? ''])
+}
+
+function getWorkerQuery(row) {
+  return new URLSearchParams({
+    lastName: row.LastName,
+    firstName: row.FirstName,
+    patronymic: row.Patronymic ?? '',
+  })
+}
+
+function clearSignatureUrls() {
+  signatureUrls.value.forEach((url) => URL.revokeObjectURL(url))
+  signatureUrls.value.clear()
+}
+
+async function loadSignature(row) {
+  const key = getWorkerKey(row)
+  const currentUrl = signatureUrls.value.get(key)
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl)
+    signatureUrls.value.delete(key)
+  }
+  if (!row.Роспись) return
+
+  const response = await fetch(`/api/employees/signature?${getWorkerQuery(row)}`, {
+    headers: { Authorization: 'Bearer ' + props.token },
+  })
+  if (response.ok) {
+    signatureUrls.value.set(
+      key,
+      URL.createObjectURL(await response.blob()),
+    )
+  }
+}
+
+async function uploadSignature(row, event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+
+  errorMessage.value = ''
+  const body = new FormData()
+  body.append('signature', file)
+  const response = await fetch(`/api/employees/signature?${getWorkerQuery(row)}`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + props.token },
+    body,
+  })
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null)
+    errorMessage.value =
+      problem?.errors?.signature?.[0] ?? 'Не удалось загрузить роспись.'
+    return
+  }
+
+  row.Роспись = true
+  await loadSignature(row)
+}
+
+async function deleteSignature(row) {
+  const response = await fetch(`/api/employees/signature?${getWorkerQuery(row)}`, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + props.token },
+  })
+  if (!response.ok) {
+    errorMessage.value = 'Не удалось удалить роспись.'
+    return
+  }
+
+  row.Роспись = false
+  await loadSignature(row)
 }
 
 function formatCell(value) {
@@ -278,6 +360,7 @@ function toggleVisibleRows() {
 async function loadTable() {
   isLoading.value = true
   errorMessage.value = ''
+  clearSignatureUrls()
 
   const query = new URLSearchParams({
     page: String(currentPage.value),
@@ -312,11 +395,14 @@ async function loadTable() {
     const data = await response.json()
     columns.value = data.columns.filter(
       (column) =>
-        props.selectedTableId !== 'meh_ost' ||
+        props.selectedTableId !== 'v_meh_ost' ||
         !['price', 'цена'].includes(column.trim().toLowerCase()),
     )
     rows.value = data.rows
     totalRows.value = data.total
+    if (isWorkersTable.value) {
+      await Promise.all(rows.value.map(loadSignature))
+    }
   } catch (error) {
     columns.value = []
     rows.value = []
@@ -326,6 +412,8 @@ async function loadTable() {
   } finally {
     isLoading.value = false
   }
+
+  onBeforeUnmount(clearSignatureUrls)
 }
 
 function changePage(nextPage) {
@@ -385,7 +473,7 @@ watch(
         <p class="eyebrow">ДАННЫЕ</p>
         <h1>Таблицы</h1>
       </div>
-      <div class="user-avatar" aria-label="Профиль пользователя">П</div>
+      <UserAvatar :token="token" />
     </header>
 
     <div class="tables-layout">
@@ -519,7 +607,34 @@ watch(
                     @change="toggleRow(row)"
                   />
                 </td>
-                <td v-for="column in columns" :key="column">{{ formatCell(row[column]) }}</td>
+                <td v-for="column in columns" :key="column">
+                  <div v-if="column === 'Роспись'" class="signature-cell">
+                    <img
+                      v-if="signatureUrls.get(getWorkerKey(row))"
+                      class="employee-signature"
+                      :src="signatureUrls.get(getWorkerKey(row))"
+                      alt="Роспись работника"
+                    />
+                    <span v-else class="signature-placeholder">Нет</span>
+                    <label class="signature-upload-button">
+                      {{ row.Роспись ? 'Заменить' : 'Добавить' }}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        @change="uploadSignature(row, $event)"
+                      />
+                    </label>
+                    <button
+                      v-if="row.Роспись"
+                      class="signature-delete-button"
+                      type="button"
+                      @click="deleteSignature(row)"
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                  <template v-else>{{ formatCell(row[column]) }}</template>
+                </td>
                 <td v-if="isSelectableTable" class="quantity-column">
                   <input
                     class="quantity-input"

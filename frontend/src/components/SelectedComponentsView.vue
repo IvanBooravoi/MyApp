@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { renderPdfDocument } from '../utils/pdfPreview'
+import { createPdfDocument, renderPdfDocument } from '../utils/pdfPreview'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -101,6 +102,16 @@ async function generateDocument() {
     return
   }
 
+  const vehicleNumbers = vehicleNumber.value
+    .split(';')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (vehicleNumbers.length > props.rows.length) {
+    documentError.value =
+      'Количество номеров техники не должно превышать количество наименований.'
+    return
+  }
+
   if (!props.responsibleEmployee) {
     documentError.value = 'Выберите ответственное лицо за выдачу.'
     return
@@ -117,6 +128,17 @@ async function generateDocument() {
     return
   }
 
+  const maintenanceNames = [
+    ...new Set(
+      props.rows
+        .map((row) => String(row.__maintenanceName ?? '').trim())
+        .filter(Boolean),
+    ),
+  ]
+  const jobName = maintenanceNames.length === 1
+    ? maintenanceNames[0]
+    : 'Аварийная'
+
   if (props.rows.length > 100) {
     documentError.value = 'Можно сформировать не более 100 компонентов за один раз.'
     return
@@ -131,32 +153,34 @@ async function generateDocument() {
   previewWindow.document.body.textContent = 'Формирование PDF...'
   isGeneratingDocument.value = true
   try {
-    const response = await fetch('/api/documents/components', {
+    const documentRequest = {
+      date: documentDate.value,
+      vehicleNumber: vehicleNumber.value.trim(),
+      sourceTable,
+      jobName,
+      responsibleEmployee: {
+        firstName: props.responsibleEmployee.firstName,
+        patronymic: props.responsibleEmployee.patronymic,
+        lastName: props.responsibleEmployee.lastName,
+      },
+      items: props.rows.map((row) => ({
+        name: String(getRowValue(row, ['name', 'Наименование']) ?? ''),
+        unit: String(getRowValue(row, ['unit', 'Ед.изм.', 'Ед. изм.']) ?? ''),
+        quantity: Number(row.__quantity ?? 1),
+        availableQuantity: Number(
+          row.__availableQuantity ??
+            getRowValue(row, ['amount', 'Количество']) ??
+            0,
+        ),
+      })),
+    }
+    const response = await fetch('/api/documents/components/preview', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${props.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        date: documentDate.value,
-        vehicleNumber: vehicleNumber.value.trim(),
-        sourceTable,
-        responsibleEmployee: {
-          firstName: props.responsibleEmployee.firstName,
-          patronymic: props.responsibleEmployee.patronymic,
-          lastName: props.responsibleEmployee.lastName,
-        },
-        items: props.rows.map((row) => ({
-          name: String(getRowValue(row, ['name', 'Наименование']) ?? ''),
-          unit: String(getRowValue(row, ['unit', 'Ед.изм.', 'Ед. изм.']) ?? ''),
-          quantity: Number(row.__quantity ?? 1),
-          availableQuantity: Number(
-            row.__availableQuantity ??
-              getRowValue(row, ['amount', 'Количество']) ??
-              0,
-          ),
-        })),
-      }),
+      body: JSON.stringify(documentRequest),
     })
 
     if (!response.ok) {
@@ -173,10 +197,24 @@ async function generateDocument() {
     }
 
     const result = await response.json()
-    if (result.documents.length !== 1) {
-      throw new Error('Сервер вернул некорректное количество PDF-файлов.')
+    const pdfBlob = await createPdfDocument(result.document, props.token)
+    const commitResponse = await fetch('/api/documents/components', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + props.token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(documentRequest),
+    })
+    if (!commitResponse.ok) {
+      const problem = await commitResponse.json().catch(() => null)
+      throw new Error(
+        problem?.detail ??
+          problem?.title ??
+          'PDF создан, но не удалось списать компоненты.',
+      )
     }
-    renderPdfDocument(previewWindow, result.documents[0])
+    renderPdfDocument(previewWindow, pdfBlob)
   } catch (error) {
     previewWindow.close()
     documentError.value =
@@ -192,10 +230,10 @@ async function generateDocument() {
   <main class="home-page tables-page" :class="{ 'home-page--expanded': navigationCollapsed }">
     <header class="home-header">
       <div>
-        <p class="eyebrow">FULL_OST / MEH_OST</p>
+        <p class="eyebrow">V_FULL_OST / V_MEH_OST</p>
         <h1>Выбранные компоненты</h1>
       </div>
-      <div class="user-avatar" aria-label="Профиль пользователя">П</div>
+      <UserAvatar :token="token" />
     </header>
 
     <section class="data-table-panel macos-glass-panel">
@@ -231,8 +269,8 @@ async function generateDocument() {
           <input
             v-model="vehicleNumber"
             type="text"
-            maxlength="100"
-            placeholder="Введите номер техники"
+            maxlength="500"
+            placeholder="Один номер или несколько через точку с запятой"
             required
           />
         </label>

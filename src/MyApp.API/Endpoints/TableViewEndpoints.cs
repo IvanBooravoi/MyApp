@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using MyApp.Application.DTO;
 using MyApp.Application.Services;
 
@@ -11,6 +12,7 @@ public static class TableViewEndpoints
         endpoints.MapGet("/api/tables/{tableName}", async (
             string tableName,
             ITableViewService tableViewService,
+            ClaimsPrincipal principal,
             CancellationToken cancellationToken,
             int page = 1,
             string pageSize = "20",
@@ -28,7 +30,8 @@ public static class TableViewEndpoints
                 lastName,
                 firstName,
                 patronymic,
-                profession);
+                profession,
+                principal.IsInRole("administrator"));
             var result = await tableViewService.GetAsync(
                 query,
                 cancellationToken);

@@ -8,16 +8,13 @@ public interface IRequirementJournalRepository
         Guid userId,
         string authorName,
         string issuerName,
-        string vehicleNumber,
-        string sourceTable,
-        IReadOnlyList<ComponentDocumentItem> items,
-        GeneratedPdfDocument document,
+        ComponentDocumentRequest request,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<RequirementJournalEntry>> GetRecentAsync(
         CancellationToken cancellationToken);
 
-    Task<GeneratedPdfDocument?> GetPdfAsync(
+    Task<ComponentDocumentRequest?> GetDocumentRequestAsync(
         Guid id,
         CancellationToken cancellationToken);
 

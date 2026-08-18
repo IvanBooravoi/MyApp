@@ -2,11 +2,14 @@
 import { ref } from 'vue'
 import AuthLogin from './components/AuthLogin.vue'
 import HomeView from './components/HomeView.vue'
+import MaintenanceView from './components/MaintenanceView.vue'
 import NavigationSidebar from './components/NavigationSidebar.vue'
+import ProfileView from './components/ProfileView.vue'
 import RequirementsJournalView from './components/RequirementsJournalView.vue'
 import SelectedComponentsView from './components/SelectedComponentsView.vue'
 import SettingsView from './components/SettingsView.vue'
 import TablesView from './components/TablesView.vue'
+import VehicleJournalView from './components/VehicleJournalView.vue'
 
 const TOKEN_KEY = 'myapp.authToken'
 const ROLE_KEY = 'myapp.userRole'
@@ -21,10 +24,11 @@ const token = ref(storedRole ? storedToken : null)
 const role = ref(storedRole)
 const isNavigationCollapsed = ref(false)
 const currentPage = ref('home')
-const currentTable = ref('full_ost')
+const currentTable = ref('v_full_ost')
 const currentSettings = ref('users')
 const selectedComponentRows = ref([])
 const selectedResponsibleEmployee = ref(null)
+const profileVersion = ref(0)
 
 function handleAuthenticated(authData) {
   localStorage.setItem(TOKEN_KEY, authData.token)
@@ -47,7 +51,7 @@ function handleLogout() {
 function openTable(tableName) {
   if (
     tableName !== currentTable.value &&
-    (tableName === 'full_ost' || tableName === 'meh_ost')
+    (tableName === 'v_full_ost' || tableName === 'v_meh_ost')
   ) {
     selectedResponsibleEmployee.value = null
   }
@@ -62,6 +66,11 @@ function openSettings(section) {
 
 function openSelectedComponents() {
   currentPage.value = 'selected-components'
+}
+
+function applyMaintenanceTemplate(rows) {
+  currentTable.value = 'v_full_ost'
+  updateSelectedComponentRows(rows)
 }
 
 function updateResponsibleEmployee(employee) {
@@ -99,6 +108,8 @@ function updateSelectedComponentRows(rows) {
       :active-settings="currentSettings"
       :is-admin="role === 'administrator'"
       :selected-components-count="selectedComponentRows.length"
+      :token="token"
+      :profile-version="profileVersion"
       @toggle="isNavigationCollapsed = !isNavigationCollapsed"
       @navigate="currentPage = $event"
       @navigate-table="openTable"
@@ -109,6 +120,7 @@ function updateSelectedComponentRows(rows) {
     <HomeView
       v-if="currentPage === 'home'"
       :navigation-collapsed="isNavigationCollapsed"
+      :token="token"
     />
     <TablesView
       v-else-if="currentPage === 'tables'"
@@ -137,11 +149,30 @@ function updateSelectedComponentRows(rows) {
       :navigation-collapsed="isNavigationCollapsed"
       :token="token"
     />
+    <MaintenanceView
+      v-else-if="currentPage === 'maintenance'"
+      :navigation-collapsed="isNavigationCollapsed"
+      :selected-count="selectedComponentRows.length"
+      :token="token"
+      @apply-template="applyMaintenanceTemplate"
+      @show-selected="openSelectedComponents"
+    />
+    <VehicleJournalView
+      v-else-if="currentPage === 'vehicles'"
+      :navigation-collapsed="isNavigationCollapsed"
+      :token="token"
+    />
     <SettingsView
       v-else-if="currentPage === 'settings' && role === 'administrator'"
       :navigation-collapsed="isNavigationCollapsed"
       :selected-section="currentSettings"
       :token="token"
+    />
+    <ProfileView
+      v-else-if="currentPage === 'profile'"
+      :navigation-collapsed="isNavigationCollapsed"
+      :token="token"
+      @profile-updated="profileVersion++"
     />
   </div>
 </template>

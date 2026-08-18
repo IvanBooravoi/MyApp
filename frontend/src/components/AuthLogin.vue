@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import brandLogo from '../assets/brand-logo.png'
 
 const emit = defineEmits(['authenticated'])
 
@@ -50,8 +51,8 @@ async function submitLogin() {
 <template>
   <main class="auth-page">
     <section class="auth-card macos-glass-panel" aria-labelledby="login-title">
-      <div class="brand-mark" aria-hidden="true">M</div>
-      <p class="eyebrow">MYAPP</p>
+      <img class="auth-brand-logo" :src="brandLogo" alt="ООО «Даль-Восток Сервис»" />
+      <p class="eyebrow">ARM МЕХАНИК ООО "ДВС"</p>
       <h1 id="login-title">Добро пожаловать</h1>
       <p class="auth-subtitle">Войдите в аккаунт, чтобы продолжить работу.</p>
 

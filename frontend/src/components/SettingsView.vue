@@ -1,5 +1,9 @@
 <script setup>
 import { reactive, ref, watch } from 'vue'
+import CsvFilesSettings from './CsvFilesSettings.vue'
+import MaterialGroupsSettings from './MaterialGroupsSettings.vue'
+import MaintenanceTemplatesSettings from './MaintenanceTemplatesSettings.vue'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
   navigationCollapsed: {
@@ -313,6 +317,9 @@ function sectionTitle(section) {
     users: 'Пользователи',
     registration: 'Регистрация пользователя',
     professions: 'Профессии',
+    'material-groups': 'Группы материалов',
+    maintenance: 'Шаблоны ТО',
+    'csv-files': 'Загрузка CSV',
   }[section]
 }
 
@@ -356,7 +363,7 @@ watch(
         <p class="eyebrow">АДМИНИСТРИРОВАНИЕ</p>
         <h1>{{ sectionTitle(selectedSection) }}</h1>
       </div>
-      <div class="user-avatar" aria-label="Профиль администратора">А</div>
+      <UserAvatar :token="token" fallback="А" label="Профиль администратора" />
     </header>
 
     <section v-if="selectedSection === 'users'" class="macos-glass-panel settings-panel">
@@ -530,7 +537,10 @@ watch(
       </form>
     </section>
 
-    <section v-else class="macos-glass-panel settings-panel professions-panel">
+    <section
+      v-else-if="selectedSection === 'professions'"
+      class="macos-glass-panel settings-panel professions-panel"
+    >
       <div class="profession-create-section">
         <h2>{{ editingProfessionId ? 'Редактирование профессии' : 'Создание профессии' }}</h2>
         <p>Введите название профессии длиной до 40 символов.</p>
@@ -608,6 +618,21 @@ watch(
           </tbody>
         </table>
       </div>
+    </section>
+    <section
+      v-else-if="selectedSection === 'material-groups'"
+      class="macos-glass-panel settings-panel"
+    >
+      <MaterialGroupsSettings :token="token" />
+    </section>
+    <section
+      v-else-if="selectedSection === 'maintenance'"
+      class="macos-glass-panel settings-panel"
+    >
+      <MaintenanceTemplatesSettings :token="token" />
+    </section>
+    <section v-else class="macos-glass-panel settings-panel">
+      <CsvFilesSettings :token="token" />
     </section>
   </main>
 </template>

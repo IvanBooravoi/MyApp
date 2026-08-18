@@ -15,12 +15,12 @@ public static class RequirementJournalEndpoints
             return Results.Ok(requirements);
         }).RequireAuthorization();
 
-        endpoints.MapGet("/api/requirements/{id:guid}/pdf", async (
+        endpoints.MapGet("/api/requirements/{id:guid}/document", async (
             Guid id,
             IRequirementJournalService service,
             CancellationToken cancellationToken) =>
         {
-            var document = await service.GetPdfAsync(id, cancellationToken);
+            var document = await service.GetDocumentAsync(id, cancellationToken);
             return document is null ? Results.NotFound() : Results.Ok(document);
         }).RequireAuthorization();
 

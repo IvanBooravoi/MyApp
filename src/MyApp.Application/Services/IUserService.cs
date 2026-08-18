@@ -16,4 +16,27 @@ public interface IUserService
         Guid id,
         UpdateUserRequest request,
         CancellationToken cancellationToken);
+
+    Task<ServiceResult<UserProfileResponse>> GetProfileAsync(
+        Guid id,
+        CancellationToken cancellationToken);
+
+    Task<ServiceResult<UserProfileResponse>> UpdateProfileAsync(
+        Guid id,
+        UpdateProfileRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ServiceResult<UserAvatarResponse>> GetAvatarAsync(
+        Guid id,
+        CancellationToken cancellationToken);
+
+    Task<ServiceResult<UserProfileResponse>> UpdateAvatarAsync(
+        Guid id,
+        byte[] content,
+        string contentType,
+        CancellationToken cancellationToken);
+
+    Task<ServiceResult<UserProfileResponse>> DeleteAvatarAsync(
+        Guid id,
+        CancellationToken cancellationToken);
 }

@@ -1,20 +1,22 @@
+using System.Text.Json;
 using MyApp.Application.Abstractions;
 using MyApp.Application.DTO;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace MyApp.Infrastructure.Repositories;
 
 public sealed class RequirementJournalRepository(
     NpgsqlDataSource dataSource) : IRequirementJournalRepository
 {
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
     public async Task SaveAsync(
         Guid userId,
         string authorName,
         string issuerName,
-        string vehicleNumber,
-        string sourceTable,
-        IReadOnlyList<ComponentDocumentItem> items,
-        GeneratedPdfDocument document,
+        ComponentDocumentRequest request,
         CancellationToken cancellationToken)
     {
         var requirementId = Guid.NewGuid();
@@ -35,8 +37,7 @@ public sealed class RequirementJournalRepository(
                     issuer_name,
                     vehicle_number,
                     source_table,
-                    pdf_file_name,
-                    pdf_content)
+                    form_data)
                 VALUES (
                     @id,
                     @createdBy,
@@ -44,27 +45,32 @@ public sealed class RequirementJournalRepository(
                     @issuerName,
                     @vehicleNumber,
                     @sourceTable,
-                    @pdfFileName,
-                    @pdfContent)
+                    @formData)
                 """;
             headerCommand.Parameters.AddWithValue("id", requirementId);
             headerCommand.Parameters.AddWithValue("createdBy", userId);
             headerCommand.Parameters.AddWithValue("authorName", authorName);
             headerCommand.Parameters.AddWithValue("issuerName", issuerName);
-            headerCommand.Parameters.AddWithValue("vehicleNumber", vehicleNumber);
-            headerCommand.Parameters.AddWithValue("sourceTable", sourceTable);
-            headerCommand.Parameters.AddWithValue("pdfFileName", document.FileName);
-            headerCommand.Parameters.AddWithValue("pdfContent", document.Content);
+            headerCommand.Parameters.AddWithValue(
+                "vehicleNumber",
+                request.VehicleNumber);
+            headerCommand.Parameters.AddWithValue(
+                "sourceTable",
+                request.SourceTable);
+            headerCommand.Parameters.AddWithValue(
+                "formData",
+                NpgsqlDbType.Jsonb,
+                JsonSerializer.Serialize(request, JsonOptions));
             await headerCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        for (var index = 0; index < items.Count; index++)
+        for (var index = 0; index < request.Items.Count; index++)
         {
-            var item = items[index];
+            var item = request.Items[index];
             await UpdateCsvAsync(
                 connection,
                 transaction,
-                sourceTable,
+                request.SourceTable,
                 item,
                 cancellationToken);
             await using var itemCommand = connection.CreateCommand();
@@ -104,8 +110,8 @@ public sealed class RequirementJournalRepository(
     {
         var fileName = sourceTable switch
         {
-            "full_ost" => "o",
-            "meh_ost" => "c",
+            "v_full_ost" or "full_ost" => "o",
+            "v_meh_ost" or "meh_ost" => "c",
             _ => throw new InvalidOperationException(
                 "Неизвестный источник компонентов.")
         };
@@ -190,26 +196,26 @@ public sealed class RequirementJournalRepository(
         return entries;
     }
 
-    public async Task<GeneratedPdfDocument?> GetPdfAsync(
+    public async Task<ComponentDocumentRequest?> GetDocumentRequestAsync(
         Guid id,
         CancellationToken cancellationToken)
     {
         await using var command = dataSource.CreateCommand(
             """
-            SELECT pdf_file_name, pdf_content
+            SELECT form_data
             FROM component_requirements
             WHERE id = @id
             """);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(1))
+        if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(0))
         {
             return null;
         }
 
-        return new GeneratedPdfDocument(
+        return JsonSerializer.Deserialize<ComponentDocumentRequest>(
             reader.GetString(0),
-            reader.GetFieldValue<byte[]>(1));
+            JsonOptions);
     }
 
     public async Task<bool> DeleteAsync(
@@ -290,8 +296,8 @@ public sealed class RequirementJournalRepository(
     {
         var fileName = sourceTable switch
         {
-            "full_ost" => "o",
-            "meh_ost" => "c",
+            "v_full_ost" or "full_ost" => "o",
+            "v_meh_ost" or "meh_ost" => "c",
             _ => throw new InvalidOperationException(
                 "Для требования не указан источник остатков.")
         };
@@ -327,7 +333,11 @@ public sealed class RequirementJournalRepository(
         string itemName,
         CancellationToken cancellationToken)
     {
-        if (sourceTable is not ("full_ost" or "meh_ost"))
+        if (sourceTable is not (
+                "v_full_ost" or
+                "v_meh_ost" or
+                "full_ost" or
+                "meh_ost"))
         {
             throw new InvalidOperationException(
                 "Для требования не указан источник остатков.");
@@ -335,13 +345,23 @@ public sealed class RequirementJournalRepository(
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            $"""
-            SELECT amount
-            FROM {sourceTable}
-            WHERE BTRIM(name) = BTRIM(@name)
-            LIMIT 1
-            """;
+        command.CommandText = sourceTable switch
+        {
+            "v_full_ost" or "v_meh_ost" =>
+                $"""
+                SELECT "Количество"
+                FROM {sourceTable}
+                WHERE BTRIM("Наименование") = BTRIM(@name)
+                LIMIT 1
+                """,
+            _ =>
+                $"""
+                SELECT amount
+                FROM {sourceTable}
+                WHERE BTRIM(name) = BTRIM(@name)
+                LIMIT 1
+                """
+        };
         command.Parameters.AddWithValue("name", itemName);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         if (result is null || result is DBNull)

@@ -19,15 +19,10 @@ var jwtOptions = new JwtOptions(
         ?? throw new InvalidOperationException("Configuration value 'Jwt:Issuer' is required."),
     jwtSection.GetValue<string>("Audience")
         ?? throw new InvalidOperationException("Configuration value 'Jwt:Audience' is required."));
-var componentPdfTemplatePath = builder.Configuration.GetValue<string>(
-    "DocumentTemplates:ComponentIssuePath")
-    ?? "/mnt/dietpi_userdata/Document/t.pdf";
-
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(
     connectionString,
-    jwtOptions,
-    componentPdfTemplatePath);
+    jwtOptions);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
 
@@ -50,6 +45,12 @@ app.MapProfessionEndpoints();
 app.MapTableViewEndpoints();
 app.MapComponentDocumentEndpoints();
 app.MapResponsibleEmployeeEndpoints();
+app.MapEmployeeSignatureEndpoints();
+app.MapCsvFileEndpoints();
 app.MapRequirementJournalEndpoints();
+app.MapMaterialGroupEndpoints();
+app.MapMaintenanceTemplateEndpoints();
+app.MapUserProfileEndpoints();
+app.MapVehicleEndpoints();
 
 app.Run();

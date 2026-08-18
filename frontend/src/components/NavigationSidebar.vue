@@ -1,5 +1,6 @@
 <script setup>
-import { ref } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import brandLogo from '../assets/brand-logo.png'
 
 const props = defineProps({
   collapsed: {
@@ -26,6 +27,8 @@ const props = defineProps({
     type: Number,
     required: true,
   },
+  token: { type: String, required: true },
+  profileVersion: { type: Number, required: true },
 })
 
 const emit = defineEmits([
@@ -38,6 +41,33 @@ const emit = defineEmits([
 ])
 const isTablesExpanded = ref(false)
 const isSettingsExpanded = ref(false)
+const profile = ref(null)
+const avatarUrl = ref('')
+
+watch(() => [props.token, props.profileVersion], loadProfile, { immediate: true })
+onBeforeUnmount(clearAvatar)
+
+function clearAvatar() {
+  if (avatarUrl.value) URL.revokeObjectURL(avatarUrl.value)
+  avatarUrl.value = ''
+}
+
+async function loadProfile() {
+  const response = await fetch('/api/profile', {
+    headers: { Authorization: `Bearer ${props.token}` },
+  })
+  if (!response.ok) return
+  profile.value = await response.json()
+  clearAvatar()
+  if (profile.value.hasAvatar) {
+    const avatarResponse = await fetch('/api/profile/avatar', {
+      headers: { Authorization: `Bearer ${props.token}` },
+    })
+    if (avatarResponse.ok) {
+      avatarUrl.value = URL.createObjectURL(await avatarResponse.blob())
+    }
+  }
+}
 
 function toggleTables() {
   if (props.collapsed) {
@@ -64,8 +94,8 @@ function toggleSettings() {
   <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
     <div class="sidebar-header">
       <div class="sidebar-brand">
-        <span class="brand-mark brand-mark--small" aria-hidden="true">M</span>
-        <span class="sidebar-label brand-name">MyApp</span>
+        <img class="sidebar-brand-logo" :src="brandLogo" alt="" aria-hidden="true" />
+        <span class="sidebar-label brand-name">ARM механик ООО "ДВС"</span>
       </div>
       <button
         v-if="collapsed"
@@ -109,6 +139,30 @@ function toggleSettings() {
       </button>
       <button
         class="nav-link"
+        :class="{ 'nav-link--active': activePage === 'maintenance' }"
+        type="button"
+        :aria-current="activePage === 'maintenance' ? 'page' : undefined"
+        @click="$emit('navigate', 'maintenance')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M6 12h12M8 17h8M9 4v6M15 10v7" />
+        </svg>
+        <span class="sidebar-label">ТО</span>
+      </button>
+      <button
+        class="nav-link"
+        :class="{ 'nav-link--active': activePage === 'vehicles' }"
+        type="button"
+        :aria-current="activePage === 'vehicles' ? 'page' : undefined"
+        @click="$emit('navigate', 'vehicles')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 16V9l2-4h10l2 4v7M4 12h16M7 16v3M17 16v3M7.5 9h9M8 14h.01M16 14h.01" />
+        </svg>
+        <span class="sidebar-label">Техника</span>
+      </button>
+      <button
+        class="nav-link"
         :class="{ 'nav-link--active': activePage === 'tables' || activePage === 'selected-components' }"
         type="button"
         :aria-expanded="isTablesExpanded"
@@ -134,17 +188,17 @@ function toggleSettings() {
       >
         <button
           class="nav-submenu-link"
-          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'full_ost' }"
+          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'v_full_ost' }"
           type="button"
-          @click="$emit('navigate-table', 'full_ost')"
+          @click="$emit('navigate-table', 'v_full_ost')"
         >
           Остатки на складе
         </button>
         <button
           class="nav-submenu-link"
-          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'meh_ost' }"
+          :class="{ 'nav-submenu-link--active': activePage === 'tables' && activeTable === 'v_meh_ost' }"
           type="button"
-          @click="$emit('navigate-table', 'meh_ost')"
+          @click="$emit('navigate-table', 'v_meh_ost')"
         >
           Остатки механиков
         </button>
@@ -230,14 +284,61 @@ function toggleSettings() {
         >
           Профессии
         </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'settings' && activeSettings === 'material-groups',
+          }"
+          type="button"
+          @click="$emit('navigate-settings', 'material-groups')"
+        >
+          Группы материалов
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'settings' && activeSettings === 'maintenance',
+          }"
+          type="button"
+          @click="$emit('navigate-settings', 'maintenance')"
+        >
+          Шаблоны ТО
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'settings' && activeSettings === 'csv-files',
+          }"
+          type="button"
+          @click="$emit('navigate-settings', 'csv-files')"
+        >
+          Загрузка CSV
+        </button>
       </div>
     </nav>
 
-    <button class="nav-link logout-button" type="button" @click="$emit('logout')">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M10 5H4v14h6M14 8l4 4-4 4m4-4H9" />
-      </svg>
-      <span class="sidebar-label">Выйти</span>
-    </button>
+    <div class="sidebar-footer">
+      <button
+        class="nav-link profile-nav-link"
+        :class="{ 'nav-link--active': activePage === 'profile' }"
+        type="button"
+        @click="$emit('navigate', 'profile')"
+      >
+        <span class="profile-avatar profile-avatar--small">
+          <img v-if="avatarUrl" :src="avatarUrl" alt="" />
+          <span v-else>{{ profile?.firstName?.[0] || 'П' }}</span>
+        </span>
+        <span class="sidebar-label">Редактировать профиль</span>
+      </button>
+      <button class="nav-link logout-button" type="button" @click="$emit('logout')">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M10 5H4v14h6M14 8l4 4-4 4m4-4H9" />
+        </svg>
+        <span class="sidebar-label">Выйти</span>
+      </button>
+    </div>
   </aside>
 </template>
