@@ -51,7 +51,7 @@ public sealed record VehicleHoursResponse(
 
 public sealed record VehicleHoursImportItem(
     Guid VehicleId,
-    decimal EngineHours);
+    decimal? EngineHours);
 
 public sealed record VehicleHoursImportError(
     int Line,

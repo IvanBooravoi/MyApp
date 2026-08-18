@@ -662,6 +662,8 @@ function printReport() {
                       Формат UTF-8:
                       <code>garage_number;model;engine_hours</code>.
                       Дата — сегодня, существующее показание заменяется.
+                      Если моточасы не указаны, используется последнее показание
+                      машины, а при его отсутствии — 0.
                     </span>
                   </div>
                   <label class="secondary-button">

@@ -164,11 +164,16 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
                 continue;
             }
             var model = columns[1].Trim();
-            if (!TryParseDecimal(columns[2], out var engineHours) ||
-                engineHours < 0)
+            decimal? engineHours = null;
+            if (!string.IsNullOrWhiteSpace(columns[2]))
             {
-                errors.Add(new(lineNumber, "Некорректное значение моточасов."));
-                continue;
+                if (!TryParseDecimal(columns[2], out var parsedEngineHours) ||
+                    parsedEngineHours < 0)
+                {
+                    errors.Add(new(lineNumber, "Некорректное значение моточасов."));
+                    continue;
+                }
+                engineHours = parsedEngineHours;
             }
 
             var matches = vehicles

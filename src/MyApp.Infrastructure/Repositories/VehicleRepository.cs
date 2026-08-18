@@ -210,6 +210,26 @@ public sealed class VehicleRepository(NpgsqlDataSource dataSource) : IVehicleRep
             cancellationToken);
         foreach (var item in items)
         {
+            var engineHours = item.EngineHours;
+            if (engineHours is null)
+            {
+                await using var previous = connection.CreateCommand();
+                previous.Transaction = transaction;
+                previous.CommandText =
+                    """
+                    SELECT engine_hours
+                    FROM vehicle_hour_readings
+                    WHERE vehicle_id = @vehicleId
+                      AND reading_date <= @readingDate
+                    ORDER BY reading_date DESC, created_at DESC
+                    LIMIT 1
+                    """;
+                previous.Parameters.AddWithValue("vehicleId", item.VehicleId);
+                previous.Parameters.AddWithValue("readingDate", readingDate);
+                var value = await previous.ExecuteScalarAsync(cancellationToken);
+                engineHours = value is decimal hours ? hours : 0m;
+            }
+
             await using var update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText =
@@ -222,7 +242,7 @@ public sealed class VehicleRepository(NpgsqlDataSource dataSource) : IVehicleRep
                 WHERE vehicle_id = @vehicleId
                   AND reading_date = @readingDate
                 """;
-            update.Parameters.AddWithValue("hours", item.EngineHours);
+            update.Parameters.AddWithValue("hours", engineHours.Value);
             update.Parameters.AddWithValue("createdBy", createdBy);
             update.Parameters.AddWithValue("vehicleId", item.VehicleId);
             update.Parameters.AddWithValue("readingDate", readingDate);
@@ -243,7 +263,7 @@ public sealed class VehicleRepository(NpgsqlDataSource dataSource) : IVehicleRep
             insert.Parameters.AddWithValue("id", Guid.NewGuid());
             insert.Parameters.AddWithValue("vehicleId", item.VehicleId);
             insert.Parameters.AddWithValue("readingDate", readingDate);
-            insert.Parameters.AddWithValue("hours", item.EngineHours);
+            insert.Parameters.AddWithValue("hours", engineHours.Value);
             insert.Parameters.AddWithValue("createdBy", createdBy);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
