@@ -100,54 +100,54 @@ async function loadVehicles() {
   } finally {
     isLoading.value = false
   }
+}
 
-  function selectVehicle() {
-    const query = normalizeVehicleNumber(vehicleQuery.value)
-    if (!query) {
-      errorMessage.value = 'Введите гаражный или государственный номер.'
-      return
-    }
-    const exactMatches = vehicles.value.filter((vehicle) =>
-      normalizeVehicleNumber(vehicle.garageNumber) === query ||
-      normalizeVehicleNumber(vehicle.stateNumber) === query,
-    )
-    const matches = exactMatches.length
-      ? exactMatches
-      : vehicles.value.filter((vehicle) =>
-          normalizeVehicleNumber(vehicle.garageNumber).includes(query) ||
-          normalizeVehicleNumber(vehicle.stateNumber).includes(query),
-        )
-    if (matches.length !== 1) {
-      selectedVehicleId.value = ''
-      journal.value = null
-      vehicleSearchMatches.value = matches
-      errorMessage.value = matches.length
-        ? ''
-        : 'Техника с таким номером не найдена.'
-      return
-    }
-    chooseVehicle(matches[0])
+function selectVehicle() {
+  const query = normalizeVehicleNumber(vehicleQuery.value)
+  if (!query) {
+    errorMessage.value = 'Введите гаражный или государственный номер.'
+    return
   }
+  const exactMatches = vehicles.value.filter((vehicle) =>
+    normalizeVehicleNumber(vehicle.garageNumber) === query ||
+    normalizeVehicleNumber(vehicle.stateNumber) === query,
+  )
+  const matches = exactMatches.length
+    ? exactMatches
+    : vehicles.value.filter((vehicle) =>
+        normalizeVehicleNumber(vehicle.garageNumber).includes(query) ||
+        normalizeVehicleNumber(vehicle.stateNumber).includes(query),
+      )
+  if (matches.length !== 1) {
+    selectedVehicleId.value = ''
+    journal.value = null
+    vehicleSearchMatches.value = matches
+    errorMessage.value = matches.length
+      ? ''
+      : 'Техника с таким номером не найдена.'
+    return
+  }
+  chooseVehicle(matches[0])
+}
 
-  async function chooseVehicle(vehicle) {
-    vehicleSearchMatches.value = []
-    errorMessage.value = ''
-    vehicleQuery.value = vehicle.stateNumber ||
-      String(vehicle.garageNumber ?? '')
-    selectedVehicleId.value = vehicle.id
-    await loadJournal()
-  }
+async function chooseVehicle(vehicle) {
+  vehicleSearchMatches.value = []
+  errorMessage.value = ''
+  vehicleQuery.value = vehicle.stateNumber ||
+    String(vehicle.garageNumber ?? '')
+  selectedVehicleId.value = vehicle.id
+  await loadJournal()
+}
 
-  function normalizeVehicleNumber(value) {
-    const lookalikes = {
-      А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H',
-      О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
-    }
-    return String(value ?? '')
-      .toLocaleUpperCase('ru-RU')
-      .replace(/[АВЕКМНОРСТУХ]/g, (letter) => lookalikes[letter])
-      .replace(/[^A-Z0-9]/g, '')
+function normalizeVehicleNumber(value) {
+  const lookalikes = {
+    А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H',
+    О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
   }
+  return String(value ?? '')
+    .toLocaleUpperCase('ru-RU')
+    .replace(/[АВЕКМНОРСТУХ]/g, (letter) => lookalikes[letter])
+    .replace(/[^A-Z0-9]/g, '')
 }
 
 async function loadJournal() {
@@ -182,6 +182,32 @@ async function addEntry() {
   errorMessage.value = ''
   try {
     const payload = { ...forms[activeTab.value] }
+    const response = await fetch(
+      `/api/vehicles/${selectedVehicleId.value}/${activeTab.value}`,
+      {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify(payload),
+      },
+    )
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null)
+      const validation = problem?.errors
+        ? Object.values(problem.errors).flat()[0]
+        : null
+      throw new Error(validation ?? problem?.detail ?? 'Не удалось сохранить запись.')
+    }
+    const created = await response.json()
+    if (activeTab.value === 'defects' && pendingDefectPhotos.value.length) {
+      try {
+        await uploadEntryPhotos('defects', created.id, pendingDefectPhotos.value)
+      } catch (error) {
+        resetForm(activeTab.value)
+        await loadJournal()
+        throw new Error(`Дефект сохранён. ${error.message}`)
+      }
+    }
+
     async function importHours(event) {
       const file = event.target.files[0]
       event.target.value = ''
@@ -212,31 +238,6 @@ async function addEntry() {
         errorMessage.value = error.message
       } finally {
         isSaving.value = false
-      }
-    }
-    const response = await fetch(
-      `/api/vehicles/${selectedVehicleId.value}/${activeTab.value}`,
-      {
-        method: 'POST',
-        headers: authHeaders(true),
-        body: JSON.stringify(payload),
-      },
-    )
-    if (!response.ok) {
-      const problem = await response.json().catch(() => null)
-      const validation = problem?.errors
-        ? Object.values(problem.errors).flat()[0]
-        : null
-      throw new Error(validation ?? problem?.detail ?? 'Не удалось сохранить запись.')
-    }
-    const created = await response.json()
-    if (activeTab.value === 'defects' && pendingDefectPhotos.value.length) {
-      try {
-        await uploadEntryPhotos('defects', created.id, pendingDefectPhotos.value)
-      } catch (error) {
-        resetForm(activeTab.value)
-        await loadJournal()
-        throw new Error(`Дефект сохранён. ${error.message}`)
       }
     }
     if (activeTab.value === 'works' && pendingWorkPhotos.value.length) {
