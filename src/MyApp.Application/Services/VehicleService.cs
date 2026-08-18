@@ -413,7 +413,12 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         var rows = new List<VehicleHoursImportRow>();
         try
         {
-            using var reader = ExcelReaderFactory.CreateReader(excel);
+            using var reader = ExcelReaderFactory.CreateReader(
+                excel,
+                new ExcelReaderConfiguration
+                {
+                    FallbackEncoding = Encoding.UTF8
+                });
             var lineNumber = 0;
             while (reader.Read())
             {
