@@ -739,24 +739,24 @@ function printReport() {
             </div>
 
             <div class="data-table-scroll vehicle-table">
-              <table v-if="activeTab === 'purchases'">
+              <table v-if="activeTab === 'purchases'" class="vehicle-journal-table">
                 <thead><tr><th>Дата</th><th>№ заявки</th><th>Наименование</th><th>Кол-во</th><th>Статус</th><th>Примечание</th><th class="vehicle-screen-only"></th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td>{{ formatDate(item.requestDate) }}</td><td>{{ item.requestNumber || '—' }}</td>
-                    <td>{{ item.itemName }}</td><td>{{ formatNumber(item.quantity) }}</td>
-                    <td>{{ item.status || '—' }}</td><td>{{ item.note || '—' }}</td>
-                    <td class="vehicle-screen-only"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td data-label="Дата">{{ formatDate(item.requestDate) }}</td><td data-label="№ заявки">{{ item.requestNumber || '—' }}</td>
+                    <td data-label="Наименование">{{ item.itemName }}</td><td data-label="Количество">{{ formatNumber(item.quantity) }}</td>
+                    <td data-label="Статус">{{ item.status || '—' }}</td><td data-label="Примечание">{{ item.note || '—' }}</td>
+                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
                   </tr>
                 </tbody>
               </table>
-              <table v-else-if="activeTab === 'defects'" class="vehicle-defects-table">
+              <table v-else-if="activeTab === 'defects'" class="vehicle-journal-table vehicle-defects-table">
                 <thead><tr><th>Узел</th><th>Причина неисправности</th><th>Фото</th><th class="vehicle-screen-only"></th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td>{{ item.nodeName }}</td>
-                    <td>{{ item.failureReason }}</td>
-                    <td>
+                    <td data-label="Узел">{{ item.nodeName }}</td>
+                    <td data-label="Причина">{{ item.failureReason }}</td>
+                    <td data-label="Фото">
                       <div class="vehicle-photo-actions">
                         <span v-if="!item.photos.length">Нет</span>
                         <span v-for="photo in item.photos" :key="photo.id" class="vehicle-photo-chip">
@@ -783,28 +783,28 @@ function printReport() {
                         </label>
                       </div>
                     </td>
-                    <td class="vehicle-screen-only"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
                   </tr>
                 </tbody>
               </table>
-              <table v-else-if="activeTab === 'hours'">
+              <table v-else-if="activeTab === 'hours'" class="vehicle-journal-table">
                 <thead><tr><th>Дата</th><th>Моточасы</th><th>Примечание</th><th class="vehicle-screen-only"></th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td>{{ formatDate(item.readingDate) }}</td><td>{{ formatNumber(item.engineHours) }}</td>
-                    <td>{{ item.note || '—' }}</td>
-                    <td class="vehicle-screen-only"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td data-label="Дата">{{ formatDate(item.readingDate) }}</td><td data-label="Моточасы">{{ formatNumber(item.engineHours) }}</td>
+                    <td data-label="Примечание">{{ item.note || '—' }}</td>
+                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
                   </tr>
                 </tbody>
               </table>
-              <table v-else class="vehicle-repairs-table">
+              <table v-else class="vehicle-journal-table vehicle-repairs-table">
                 <thead><tr><th>Неисправность / узел</th><th>Выполненные работы</th><th>№ заявки</th><th>Фото</th><th class="vehicle-screen-only"></th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td>{{ item.defectNodeName || 'Старая запись без привязки' }}</td>
-                    <td>{{ item.description }}</td>
-                    <td>{{ item.purchaseRequestNumber || '—' }}</td>
-                    <td>
+                    <td data-label="Неисправность">{{ item.defectNodeName || 'Старая запись без привязки' }}</td>
+                    <td data-label="Работы">{{ item.description }}</td>
+                    <td data-label="№ заявки">{{ item.purchaseRequestNumber || '—' }}</td>
+                    <td data-label="Фото">
                       <div class="vehicle-photo-actions">
                         <span v-if="!item.photos.length">Нет</span>
                         <span v-for="photo in item.photos" :key="photo.id" class="vehicle-photo-chip">
@@ -831,7 +831,7 @@ function printReport() {
                         </label>
                       </div>
                     </td>
-                    <td class="vehicle-screen-only"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
                   </tr>
                 </tbody>
               </table>
