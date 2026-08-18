@@ -46,7 +46,8 @@ public interface IVehicleService
         CancellationToken cancellationToken);
 
     Task<VehicleHoursImportResponse> ImportHoursAsync(
-        Stream csv,
+        Stream file,
+        string fileExtension,
         Guid createdBy,
         DateOnly readingDate,
         CancellationToken cancellationToken);

@@ -208,38 +208,6 @@ async function addEntry() {
       }
     }
 
-    async function importHours(event) {
-      const file = event.target.files[0]
-      event.target.value = ''
-      if (!file) return
-      isSaving.value = true
-      errorMessage.value = ''
-      hoursImportResult.value = null
-      try {
-        const data = new FormData()
-        data.append('file', file)
-        const response = await fetch('/api/vehicles/hours/import', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: data,
-        })
-        const result = await response.json().catch(() => null)
-        if (!response.ok) {
-          const validation = result?.errors
-            ? Object.values(result.errors).flat()[0]
-            : null
-          throw new Error(
-            validation ?? result?.detail ?? 'Не удалось импортировать моточасы.',
-          )
-        }
-        hoursImportResult.value = result
-        await loadJournal()
-      } catch (error) {
-        errorMessage.value = error.message
-      } finally {
-        isSaving.value = false
-      }
-    }
     if (activeTab.value === 'works' && pendingWorkPhotos.value.length) {
       try {
         await uploadEntryPhotos('works', created.id, pendingWorkPhotos.value)
@@ -250,6 +218,39 @@ async function addEntry() {
       }
     }
     resetForm(activeTab.value)
+    await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function importHours(event) {
+  const file = event.target.files[0]
+  event.target.value = ''
+  if (!file) return
+  isSaving.value = true
+  errorMessage.value = ''
+  hoursImportResult.value = null
+  try {
+    const data = new FormData()
+    data.append('file', file)
+    const response = await fetch('/api/vehicles/hours/import', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: data,
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok) {
+      const validation = result?.errors
+        ? Object.values(result.errors).flat()[0]
+        : null
+      throw new Error(
+        validation ?? result?.detail ?? 'Не удалось импортировать моточасы.',
+      )
+    }
+    hoursImportResult.value = result
     await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
@@ -657,9 +658,10 @@ function printReport() {
                 </label>
                 <div class="vehicle-hours-import vehicle-field--full">
                   <div>
-                    <strong>Импорт из CSV</strong>
+                    <strong>Импорт из Excel или CSV</strong>
                     <span>
-                      Формат UTF-8:
+                      Excel: обозначение техники и моточасы в первых двух столбцах.
+                      Формат CSV:
                       <code>garage_number;model;engine_hours</code>.
                       Дата — сегодня, существующее показание заменяется.
                       Если моточасы не указаны, используется последнее показание
@@ -667,9 +669,9 @@ function printReport() {
                     </span>
                   </div>
                   <label class="secondary-button">
-                    Загрузить CSV
+                    Загрузить файл
                     <input
-                      accept=".csv,text/csv"
+                      accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       type="file"
                       @change="importHours"
                     />

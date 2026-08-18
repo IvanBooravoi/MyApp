@@ -8,7 +8,7 @@ namespace MyApp.API.Endpoints;
 
 public static class VehicleEndpoints
 {
-    private const long MaximumCsvSize = 5 * 1024 * 1024;
+    private const long MaximumHoursImportSize = 5 * 1024 * 1024;
 
     public static IEndpointRouteBuilder MapVehicleEndpoints(
         this IEndpointRouteBuilder endpoints)
@@ -124,16 +124,15 @@ public static class VehicleEndpoints
             {
                 return Results.Unauthorized();
             }
-            if (file.Length is <= 0 or > MaximumCsvSize ||
-                !string.Equals(
-                    Path.GetExtension(file.FileName),
-                    ".csv",
-                    StringComparison.OrdinalIgnoreCase))
+            var extension = Path.GetExtension(file.FileName);
+            if (file.Length is <= 0 or > MaximumHoursImportSize ||
+                !string.Equals(extension, ".csv", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase))
             {
                 return Results.ValidationProblem(
                     new Dictionary<string, string[]>
                     {
-                        ["file"] = ["Выберите CSV-файл размером не более 5 МБ."]
+                        ["file"] = ["Выберите файл CSV или XLSX размером не более 5 МБ."]
                     });
             }
 
@@ -142,6 +141,7 @@ public static class VehicleEndpoints
                 await using var stream = file.OpenReadStream();
                 return Results.Ok(await service.ImportHoursAsync(
                     stream,
+                    extension,
                     userId,
                     DateOnly.FromDateTime(DateTime.Today),
                     cancellationToken));
