@@ -1,23 +1,20 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
   navigationCollapsed: { type: Boolean, required: true },
+  role: { type: String, required: true },
+  section: { type: String, required: true },
   token: { type: String, required: true },
 })
 
-const tabs = [
-  { id: 'defects', label: 'Неисправности' },
-  { id: 'works', label: 'Ремонт' },
-  { id: 'purchases', label: 'Заявки на приобретение' },
-  { id: 'hours', label: 'Моточасы' },
-]
+const emit = defineEmits(['navigate-section'])
 const today = new Date().toISOString().slice(0, 10)
+const currentLocalDateTime = toLocalDateTimeInput(new Date())
 const vehicles = ref([])
 const selectedVehicleId = ref('')
 const journal = ref(null)
-const activeTab = ref('defects')
 const vehicleQuery = ref('')
 const vehicleSearchMatches = ref([])
 const fromDate = ref('')
@@ -25,11 +22,18 @@ const toDate = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const errorMessage = ref('')
+const successMessage = ref('')
+const profile = ref(null)
 const pendingWorkPhotos = ref([])
+const pendingWorkVideos = ref([])
 const pendingDefectPhotos = ref([])
+const pendingDefectVideos = ref([])
 const photoViewerUrl = ref('')
 const photoViewerName = ref('')
+const mediaViewerType = ref('image')
 const hoursImportResult = ref(null)
+const partsRequestFiles = reactive({})
+const partsRequestForms = reactive({})
 
 const forms = reactive({
   purchases: {
@@ -41,18 +45,16 @@ const forms = reactive({
     note: '',
   },
   defects: {
-    nodeName: '',
-    failureReason: '',
-  },
-  hours: {
-    readingDate: today,
-    engineHours: '',
-    note: '',
+    errorCode: '',
+    symptoms: '',
+    downtimeStartedAt: currentLocalDateTime,
   },
   works: {
     defectId: '',
+    cause: '',
     description: '',
-    purchaseRequestNumber: '',
+    status: 'repaired',
+    requiredParts: '',
   },
 })
 
@@ -66,7 +68,21 @@ const vehicleOptions = computed(() =>
       : []),
   ]),
 )
-const currentEntries = computed(() => journal.value?.[activeTab.value] ?? [])
+const activeTab = computed(() => props.section === 'works' ? 'works' : 'defects')
+const currentEntries = computed(() => {
+  if (props.section === 'requests') {
+    return journal.value?.works?.filter(
+      (work) => work.status === 'awaiting_parts',
+    ) ?? []
+  }
+  return journal.value?.[activeTab.value] ?? []
+})
+const sectionTitle = computed(() => ({
+  defects: 'Неисправность',
+  works: 'Ремонт',
+  requests: 'Заявка ОЗЧ',
+  hours: 'Моточасы',
+}[props.section] ?? 'Техника'))
 const selectedVehicle = computed(() =>
   vehicles.value.find((vehicle) => vehicle.id === selectedVehicleId.value),
 )
@@ -75,8 +91,34 @@ const latestHours = computed(() => {
   return values.length ? values[0].engineHours : null
 })
 const defectCount = computed(() => journal.value?.defects?.length ?? 0)
+const normalizedProfession = computed(() =>
+  profile.value?.position?.trim().toLocaleLowerCase('ru-RU') ?? '',
+)
+const isAdministrator = computed(() => props.role === 'administrator')
+const canCreateDefect = computed(() =>
+  isAdministrator.value || normalizedProfession.value === 'механик',
+)
+const canExecute = computed(() =>
+  isAdministrator.value ||
+  ['слесарь', 'электрослесарь', 'сервисный инженер'].includes(
+    normalizedProfession.value,
+  ),
+)
+const canManageParts = computed(() =>
+  isAdministrator.value || normalizedProfession.value === 'старший механик',
+)
+const availableDefects = computed(() =>
+  journal.value?.defects?.filter((defect) =>
+    defect.status === 'in_progress' && (
+      isAdministrator.value ||
+      defect.assignedToId === profile.value?.id
+    ),
+  ) ?? [],
+)
 
-onMounted(loadVehicles)
+onMounted(async () => {
+  await Promise.all([loadVehicles(), loadProfile()])
+})
 onBeforeUnmount(closePhoto)
 
 function authHeaders(json = false) {
@@ -84,6 +126,11 @@ function authHeaders(json = false) {
     Authorization: `Bearer ${props.token}`,
     ...(json ? { 'Content-Type': 'application/json' } : {}),
   }
+}
+
+async function loadProfile() {
+  const response = await fetch('/api/profile', { headers: authHeaders() })
+  if (response.ok) profile.value = await response.json()
 }
 
 async function loadVehicles() {
@@ -168,6 +215,12 @@ async function loadJournal() {
     )
     if (!response.ok) throw new Error('Не удалось загрузить журнал техники.')
     journal.value = await response.json()
+    for (const work of journal.value.works) {
+      partsRequestForms[work.id] ??= {
+        requestNumber: work.partsRequestNumber ?? '',
+        requestDate: work.partsRequestDate ?? today,
+      }
+    }
   } catch (error) {
     journal.value = null
     errorMessage.value = error.message
@@ -182,6 +235,9 @@ async function addEntry() {
   errorMessage.value = ''
   try {
     const payload = { ...forms[activeTab.value] }
+    if (activeTab.value === 'defects') {
+      payload.downtimeStartedAt = new Date(payload.downtimeStartedAt).toISOString()
+    }
     const response = await fetch(
       `/api/vehicles/${selectedVehicleId.value}/${activeTab.value}`,
       {
@@ -198,9 +254,14 @@ async function addEntry() {
       throw new Error(validation ?? problem?.detail ?? 'Не удалось сохранить запись.')
     }
     const created = await response.json()
-    if (activeTab.value === 'defects' && pendingDefectPhotos.value.length) {
+    if (activeTab.value === 'defects') {
       try {
-        await uploadEntryPhotos('defects', created.id, pendingDefectPhotos.value)
+        await uploadEntryMedia(
+          'defects',
+          created.id,
+          pendingDefectPhotos.value,
+          pendingDefectVideos.value,
+        )
       } catch (error) {
         resetForm(activeTab.value)
         await loadJournal()
@@ -208,9 +269,14 @@ async function addEntry() {
       }
     }
 
-    if (activeTab.value === 'works' && pendingWorkPhotos.value.length) {
+    if (activeTab.value === 'works') {
       try {
-        await uploadEntryPhotos('works', created.id, pendingWorkPhotos.value)
+        await uploadEntryMedia(
+          'works',
+          created.id,
+          pendingWorkPhotos.value,
+          pendingWorkVideos.value,
+        )
       } catch (error) {
         resetForm(activeTab.value)
         await loadJournal()
@@ -218,7 +284,36 @@ async function addEntry() {
       }
     }
     resetForm(activeTab.value)
+    successMessage.value = activeTab.value === 'defects'
+      ? 'Неисправность зарегистрирована.'
+      : activeTab.value === 'works'
+        ? 'Результат работы сохранён.'
+        : 'Запись добавлена.'
     await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function claimDefect(defect) {
+  isSaving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const response = await fetch(`/api/vehicles/defects/${defect.id}/claim`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null)
+      throw new Error(problem?.detail ?? problem?.title ?? 'Не удалось принять задание.')
+    }
+    forms.works.defectId = defect.id
+    successMessage.value = 'Задание принято. Время начала работ зафиксировано.'
+    await loadJournal()
+    emit('navigate-section', 'works')
   } catch (error) {
     errorMessage.value = error.message
   } finally {
@@ -251,7 +346,6 @@ async function importHours(event) {
       )
     }
     hoursImportResult.value = result
-    await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
   } finally {
@@ -268,8 +362,22 @@ function selectWorkPhotos(event) {
     errorMessage.value = validation
     return
   }
+
   errorMessage.value = ''
   pendingWorkPhotos.value = files
+}
+
+function selectWorkVideos(event) {
+  const files = [...event.target.files]
+  const validation = validateVideoFiles(files)
+  if (validation) {
+    event.target.value = ''
+    pendingWorkVideos.value = []
+    errorMessage.value = validation
+    return
+  }
+  errorMessage.value = ''
+  pendingWorkVideos.value = files
 }
 
 function selectDefectPhotos(event) {
@@ -285,11 +393,24 @@ function selectDefectPhotos(event) {
   pendingDefectPhotos.value = files
 }
 
-async function uploadEntryPhotos(category, entryId, files) {
+function selectDefectVideos(event) {
+  const files = [...event.target.files]
+  const validation = validateVideoFiles(files)
+  if (validation) {
+    event.target.value = ''
+    pendingDefectVideos.value = []
+    errorMessage.value = validation
+    return
+  }
+  errorMessage.value = ''
+  pendingDefectVideos.value = files
+}
+
+async function uploadFiles(category, entryId, mediaType, files) {
   for (const file of files) {
     const data = new FormData()
     data.append('file', file)
-    const response = await fetch(`/api/vehicles/${category}/${entryId}/photos`, {
+    const response = await fetch(`/api/vehicles/${category}/${entryId}/${mediaType}`, {
       method: 'POST',
       headers: authHeaders(),
       body: data,
@@ -306,6 +427,11 @@ async function uploadEntryPhotos(category, entryId, files) {
   }
 }
 
+async function uploadEntryMedia(category, entryId, photos, videos) {
+  await uploadFiles(category, entryId, 'photos', photos)
+  await uploadFiles(category, entryId, 'videos', videos)
+}
+
 async function addPhotosToWork(workId, event) {
   const files = [...event.target.files]
   event.target.value = ''
@@ -319,7 +445,7 @@ async function addPhotosToWork(workId, event) {
   isSaving.value = true
   errorMessage.value = ''
   try {
-    await uploadEntryPhotos('works', workId, files)
+    await uploadFiles('works', workId, 'photos', files)
     await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
@@ -342,7 +468,28 @@ async function addPhotosToDefect(defectId, event) {
   isSaving.value = true
   errorMessage.value = ''
   try {
-    await uploadEntryPhotos('defects', defectId, files)
+    await uploadFiles('defects', defectId, 'photos', files)
+    await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function addVideos(category, entryId, event) {
+  const files = [...event.target.files]
+  event.target.value = ''
+  if (!files.length) return
+  const validation = validateVideoFiles(files)
+  if (validation) {
+    errorMessage.value = validation
+    return
+  }
+  isSaving.value = true
+  errorMessage.value = ''
+  try {
+    await uploadFiles(category, entryId, 'videos', files)
     await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
@@ -362,17 +509,30 @@ function validatePhotoFiles(files, existingCount) {
   return ''
 }
 
-async function openPhoto(photo, category = 'work') {
+function validateVideoFiles(files) {
+  const allowedTypes = ['video/mp4', 'video/webm', 'video/quicktime']
+  if (files.some((file) => !allowedTypes.includes(file.type) || file.size > 100 * 1024 * 1024)) {
+    return 'Разрешены MP4, WebM и MOV размером не более 100 МБ.'
+  }
+  return ''
+}
+
+async function openMedia(media, route, type = 'image') {
   closePhoto()
-  const response = await fetch(`/api/vehicles/${category}-photos/${photo.id}`, {
+  const response = await fetch(`/api/vehicles/${route}/${media.id}`, {
     headers: authHeaders(),
   })
   if (!response.ok) {
-    errorMessage.value = 'Не удалось загрузить фотографию.'
+    errorMessage.value = 'Не удалось загрузить вложение.'
     return
   }
   photoViewerUrl.value = URL.createObjectURL(await response.blob())
-  photoViewerName.value = photo.fileName
+  photoViewerName.value = media.fileName
+  mediaViewerType.value = type
+}
+
+function openPhoto(photo, category = 'work') {
+  return openMedia(photo, `${category}-photos`)
 }
 
 function closePhoto() {
@@ -395,6 +555,63 @@ async function deletePhoto(photoId, category = 'work') {
   await loadJournal()
 }
 
+async function deleteMedia(mediaId, route) {
+  if (!window.confirm('Удалить вложение?')) return
+  const response = await fetch(`/api/vehicles/${route}/${mediaId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
+    errorMessage.value = 'Не удалось удалить вложение.'
+    return
+  }
+  closePhoto()
+  await loadJournal()
+}
+
+async function savePartsRequest(work) {
+  const form = partsRequestForms[work.id] ?? {}
+  const data = new FormData()
+  data.append('requestNumber', form.requestNumber ?? '')
+  data.append('requestDate', form.requestDate ?? '')
+  if (partsRequestFiles[work.id]) data.append('file', partsRequestFiles[work.id])
+  isSaving.value = true
+  errorMessage.value = ''
+  try {
+    const response = await fetch(`/api/vehicles/works/${work.id}/parts-request`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: data,
+    })
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null)
+      throw new Error(problem?.detail ?? problem?.title ?? 'Не удалось сохранить заявку.')
+    }
+    successMessage.value = 'Заявка на запчасти сохранена.'
+    await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function downloadPartsRequest(work) {
+  const response = await fetch(`/api/vehicles/works/${work.id}/parts-request/file`, {
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
+    errorMessage.value = 'Не удалось скачать файл заявки.'
+    return
+  }
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = work.partsRequestFileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 async function deleteEntry(id) {
   if (!window.confirm('Удалить выбранную запись?')) return
   const response = await fetch(`/api/vehicles/${activeTab.value}/${id}`, {
@@ -406,6 +623,40 @@ async function deleteEntry(id) {
     return
   }
   await loadJournal()
+}
+
+async function deleteDefect(defect) {
+  const confirmed = window.confirm(
+    'Удалить неисправность? Связанные ремонты, фотографии и видео также будут удалены.',
+  )
+  if (!confirmed) return
+  isSaving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const response = await fetch(`/api/vehicles/defects/${defect.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? 'Неисправность не найдена или у вас нет прав на её удаление.'
+          : 'Не удалось удалить неисправность.',
+      )
+    }
+    closePhoto()
+    successMessage.value = 'Неисправность и связанные медиафайлы удалены.'
+    await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function canDeleteDefect(defect) {
+  return isAdministrator.value || defect.createdById === profile.value?.id
 }
 
 function resetForm(category) {
@@ -420,24 +671,33 @@ function resetForm(category) {
     })
   } else if (category === 'defects') {
     Object.assign(forms.defects, {
-      nodeName: '',
-      failureReason: '',
+      errorCode: '',
+      symptoms: '',
+      downtimeStartedAt: toLocalDateTimeInput(new Date()),
     })
     pendingDefectPhotos.value = []
-  } else if (category === 'hours') {
-    Object.assign(forms.hours, {
-      readingDate: today,
-      engineHours: '',
-      note: '',
-    })
+    pendingDefectVideos.value = []
   } else {
     Object.assign(forms.works, {
       defectId: '',
+      cause: '',
       description: '',
-      purchaseRequestNumber: '',
+      status: 'repaired',
+      requiredParts: '',
     })
     pendingWorkPhotos.value = []
+    pendingWorkVideos.value = []
   }
+}
+
+function statusLabel(status) {
+  return {
+    new: 'Новое',
+    in_progress: 'В работе',
+    repaired: 'Исправен',
+    faulty: 'Неисправен',
+    awaiting_parts: 'ОЗЧ',
+  }[status] ?? status
 }
 
 function formatDate(value) {
@@ -445,6 +705,19 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('ru-RU').format(
     new Date(`${value}T00:00:00`),
   )
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+function toLocalDateTimeInput(value) {
+  const offset = value.getTimezoneOffset() * 60_000
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16)
 }
 
 function formatNumber(value) {
@@ -464,14 +737,55 @@ function printReport() {
     <header class="home-header vehicle-screen-only">
       <div>
         <p class="eyebrow">УЧЁТ И ИСТОРИЯ</p>
-        <h1>Техника</h1>
+        <h1>{{ sectionTitle }}</h1>
       </div>
       <UserAvatar :token="token" />
     </header>
 
     <section class="vehicle-layout">
       <div class="vehicle-content">
+        <section
+          v-if="section === 'hours'"
+          class="vehicle-controls macos-glass-panel"
+        >
+          <div class="vehicle-hours-import vehicle-field--full">
+            <div>
+              <strong>Импорт из Excel или CSV</strong>
+              <span>
+                Excel: обозначение техники и моточасы в первых двух столбцах.
+                Формат CSV:
+                <code>garage_number;model;engine_hours</code>.
+                Дата — сегодня, существующее показание заменяется.
+                Если моточасы не указаны, используется последнее показание
+                машины, а при его отсутствии — 0.
+              </span>
+            </div>
+            <label class="secondary-button">
+              {{ isSaving ? 'Загрузка...' : 'Загрузить файл' }}
+              <input
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                :disabled="isSaving"
+                type="file"
+                @change="importHours"
+              />
+            </label>
+          </div>
+          <div
+            v-if="hoursImportResult"
+            class="vehicle-import-result vehicle-field--full"
+            :class="{ 'vehicle-import-result--warning': hoursImportResult.errors.length }"
+          >
+            <strong>Импортировано: {{ hoursImportResult.imported }}</strong>
+            <ul v-if="hoursImportResult.errors.length">
+              <li v-for="error in hoursImportResult.errors" :key="`${error.line}-${error.message}`">
+                Строка {{ error.line }}: {{ error.message }}
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <form
+          v-else
           class="vehicle-search macos-glass-panel vehicle-screen-only"
           @submit.prevent="selectVehicle"
         >
@@ -521,7 +835,7 @@ function printReport() {
           Загрузка...
         </p>
 
-        <template v-if="selectedVehicle && journal">
+        <template v-if="section !== 'hours' && selectedVehicle && journal">
           <section class="vehicle-card macos-glass-panel">
             <div>
               <p class="eyebrow">{{ selectedVehicle.groupName }}</p>
@@ -574,60 +888,30 @@ function printReport() {
               </button>
             </div>
 
-            <div class="vehicle-tabs">
-              <button
-                v-for="tab in tabs"
-                :key="tab.id"
-                type="button"
-                :class="{ 'vehicle-tab--active': activeTab === tab.id }"
-                @click="activeTab = tab.id"
-              >
-                {{ tab.label }}
-              </button>
-            </div>
-
-            <form class="vehicle-entry-form" @submit.prevent="addEntry">
-              <template v-if="activeTab === 'purchases'">
+            <form
+              v-if="
+                (section === 'defects' && canCreateDefect) ||
+                (section === 'works' && canExecute)
+              "
+              class="vehicle-entry-form"
+              @submit.prevent="addEntry"
+            >
+              <template v-if="section === 'defects'">
                 <label class="vehicle-field">
-                  <span>Дата</span>
-                  <input v-model="forms.purchases.requestDate" required type="date" />
-                </label>
-                <label class="vehicle-field">
-                  <span>Номер заявки</span>
-                  <input v-model="forms.purchases.requestNumber" maxlength="100" />
-                </label>
-                <label class="vehicle-field vehicle-field--wide">
-                  <span>Что приобрести</span>
-                  <input v-model="forms.purchases.itemName" required maxlength="500" />
-                </label>
-                <label class="vehicle-field">
-                  <span>Количество</span>
-                  <input v-model.number="forms.purchases.quantity" required min="0.01" step="0.01" type="number" />
-                </label>
-                <label class="vehicle-field">
-                  <span>Статус</span>
-                  <select v-model="forms.purchases.status">
-                    <option>Создана</option>
-                    <option>Согласована</option>
-                    <option>Заказано</option>
-                    <option>Получено</option>
-                    <option>Отменена</option>
-                  </select>
-                </label>
-                <label class="vehicle-field vehicle-field--wide">
-                  <span>Примечание</span>
-                  <input v-model="forms.purchases.note" />
-                </label>
-              </template>
-
-              <template v-else-if="activeTab === 'defects'">
-                <label class="vehicle-field vehicle-field--full">
-                  <span>Узел</span>
-                  <textarea v-model="forms.defects.nodeName" required rows="2"></textarea>
+                  <span>Код ошибки (при наличии)</span>
+                  <input v-model="forms.defects.errorCode" maxlength="100" />
                 </label>
                 <label class="vehicle-field vehicle-field--full">
-                  <span>Причина неисправности</span>
-                  <textarea v-model="forms.defects.failureReason" required rows="3"></textarea>
+                  <span>Симптомы неисправности</span>
+                  <textarea v-model="forms.defects.symptoms" required rows="3"></textarea>
+                </label>
+                <label class="vehicle-field">
+                  <span>Начало простоя</span>
+                  <input
+                    v-model="forms.defects.downtimeStartedAt"
+                    required
+                    type="datetime-local"
+                  />
                 </label>
                 <label class="vehicle-field vehicle-field--full">
                   <span>Фото (до 10 шт., JPEG, PNG, WebP до 8 МБ)</span>
@@ -641,77 +925,56 @@ function printReport() {
                     Выбрано: {{ pendingDefectPhotos.length }}
                   </small>
                 </label>
-              </template>
-
-              <template v-else-if="activeTab === 'hours'">
-                <label class="vehicle-field">
-                  <span>Дата показания</span>
-                  <input v-model="forms.hours.readingDate" required type="date" />
+                <label class="vehicle-field vehicle-field--full">
+                  <span>Видео (MP4, WebM, MOV до 100 МБ)</span>
+                  <input
+                    accept="video/mp4,video/webm,video/quicktime"
+                    multiple
+                    type="file"
+                    @change="selectDefectVideos"
+                  />
+                  <small v-if="pendingDefectVideos.length">
+                    Выбрано: {{ pendingDefectVideos.length }}
+                  </small>
                 </label>
-                <label class="vehicle-field">
-                  <span>Наработка, м/ч</span>
-                  <input v-model.number="forms.hours.engineHours" required min="0" step="0.1" type="number" />
-                </label>
-                <label class="vehicle-field vehicle-field--wide">
-                  <span>Примечание</span>
-                  <input v-model="forms.hours.note" />
-                </label>
-                <div class="vehicle-hours-import vehicle-field--full">
-                  <div>
-                    <strong>Импорт из Excel или CSV</strong>
-                    <span>
-                      Excel: обозначение техники и моточасы в первых двух столбцах.
-                      Формат CSV:
-                      <code>garage_number;model;engine_hours</code>.
-                      Дата — сегодня, существующее показание заменяется.
-                      Если моточасы не указаны, используется последнее показание
-                      машины, а при его отсутствии — 0.
-                    </span>
-                  </div>
-                  <label class="secondary-button">
-                    Загрузить файл
-                    <input
-                      accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                      type="file"
-                      @change="importHours"
-                    />
-                  </label>
-                </div>
-                <div
-                  v-if="hoursImportResult"
-                  class="vehicle-import-result vehicle-field--full"
-                  :class="{ 'vehicle-import-result--warning': hoursImportResult.errors.length }"
-                >
-                  <strong>Импортировано: {{ hoursImportResult.imported }}</strong>
-                  <ul v-if="hoursImportResult.errors.length">
-                    <li v-for="error in hoursImportResult.errors" :key="`${error.line}-${error.message}`">
-                      Строка {{ error.line }}: {{ error.message }}
-                    </li>
-                  </ul>
-                </div>
               </template>
 
               <template v-else>
                 <label class="vehicle-field vehicle-field--full">
-                  <span>Неисправность</span>
+                  <span>Принятое задание</span>
                   <select v-model="forms.works.defectId" required>
-                    <option value="" disabled>Выберите неисправность</option>
+                    <option value="" disabled>Выберите принятое задание</option>
                     <option
-                      v-for="defect in journal.defects"
+                      v-for="defect in availableDefects"
                       :key="defect.id"
                       :value="defect.id"
                     >
-                      {{ defect.nodeName }} — {{ defect.failureReason }}
+                      {{ defect.errorCode || 'Без кода' }} — {{ defect.symptoms }}
                     </option>
                   </select>
+                </label>
+                <label class="vehicle-field vehicle-field--full">
+                  <span>Причина неисправности</span>
+                  <textarea v-model="forms.works.cause" required rows="2"></textarea>
                 </label>
                 <label class="vehicle-field vehicle-field--full">
                   <span>Выполненные работы</span>
                   <textarea v-model="forms.works.description" required rows="3"></textarea>
                 </label>
-                <label class="vehicle-field vehicle-field--full">
-                  <span>Номер заявки на приобретение (если необходима)</span>
-                  <input v-model="forms.works.purchaseRequestNumber" maxlength="100" />
+                <label class="vehicle-field">
+                  <span>Статус</span>
+                  <select v-model="forms.works.status" required>
+                    <option value="repaired">Исправен</option>
+                    <option value="faulty">Неисправен</option>
+                    <option value="awaiting_parts">ОЗЧ</option>
+                  </select>
+                </label>
+                <label
+                  v-if="forms.works.status === 'awaiting_parts'"
+                  class="vehicle-field vehicle-field--wide"
+                >
+                  <span>Необходимые запчасти</span>
+                  <textarea v-model="forms.works.requiredParts" required rows="2"></textarea>
                 </label>
                 <label class="vehicle-field vehicle-field--full">
                   <span>Фотографии (JPEG, PNG, WebP до 8 МБ)</span>
@@ -725,44 +988,66 @@ function printReport() {
                     Выбрано: {{ pendingWorkPhotos.length }}
                   </small>
                 </label>
+                <label class="vehicle-field vehicle-field--full">
+                  <span>Видео о проделанной работе (MP4, WebM, MOV до 100 МБ)</span>
+                  <input
+                    accept="video/mp4,video/webm,video/quicktime"
+                    multiple
+                    type="file"
+                    @change="selectWorkVideos"
+                  />
+                  <small v-if="pendingWorkVideos.length">
+                    Выбрано: {{ pendingWorkVideos.length }}
+                  </small>
+                </label>
               </template>
 
               <button class="primary-button vehicle-save-button" type="submit" :disabled="isSaving">
                 {{ isSaving ? 'Сохранение...' : 'Добавить запись' }}
               </button>
             </form>
+            <p
+              v-else-if="section === 'defects'"
+              class="vehicle-empty"
+            >
+              Новые неисправности регистрирует пользователь с профессией «Механик».
+            </p>
+            <p
+              v-else-if="section === 'works'"
+              class="vehicle-empty"
+            >
+              Задания выполняют слесари, электрослесари и сервисные инженеры.
+            </p>
           </section>
+
+          <p v-if="successMessage" class="form-message form-message--success">
+            {{ successMessage }}
+          </p>
 
           <section class="vehicle-journal macos-glass-panel vehicle-screen-journal">
             <div class="vehicle-journal-header">
               <div>
                 <p class="eyebrow">ЖУРНАЛ</p>
-                <h2>{{ tabs.find((tab) => tab.id === activeTab)?.label }}</h2>
+                <h2>{{ sectionTitle }}</h2>
               </div>
               <span>{{ currentEntries.length }} записей</span>
             </div>
 
             <div class="data-table-scroll vehicle-table">
-              <table v-if="activeTab === 'purchases'" class="vehicle-journal-table">
-                <thead><tr><th>Дата</th><th>№ заявки</th><th>Наименование</th><th>Кол-во</th><th>Статус</th><th>Примечание</th><th class="vehicle-screen-only"></th></tr></thead>
+              <table v-if="section === 'defects'" class="vehicle-journal-table vehicle-defects-table">
+                <thead><tr><th>Код</th><th>Симптомы</th><th>Начало простоя</th><th>Статус /<br />исполнитель</th><th>Медиа</th><th class="vehicle-screen-only"></th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td data-label="Дата">{{ formatDate(item.requestDate) }}</td><td data-label="№ заявки">{{ item.requestNumber || '—' }}</td>
-                    <td data-label="Наименование">{{ item.itemName }}</td><td data-label="Количество">{{ formatNumber(item.quantity) }}</td>
-                    <td data-label="Статус">{{ item.status || '—' }}</td><td data-label="Примечание">{{ item.note || '—' }}</td>
-                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
-                  </tr>
-                </tbody>
-              </table>
-              <table v-else-if="activeTab === 'defects'" class="vehicle-journal-table vehicle-defects-table">
-                <thead><tr><th>Узел</th><th>Причина неисправности</th><th>Фото</th><th class="vehicle-screen-only"></th></tr></thead>
-                <tbody>
-                  <tr v-for="item in currentEntries" :key="item.id">
-                    <td data-label="Узел">{{ item.nodeName }}</td>
-                    <td data-label="Причина">{{ item.failureReason }}</td>
-                    <td data-label="Фото">
+                    <td data-label="Код">{{ item.errorCode || '—' }}</td>
+                    <td data-label="Симптомы">{{ item.symptoms }}</td>
+                    <td data-label="Начало простоя">{{ formatDateTime(item.downtimeStartedAt) }}</td>
+                    <td data-label="Статус">
+                      <strong>{{ statusLabel(item.status) }}</strong>
+                      <span v-if="item.assignedToName"> · {{ item.assignedToName }}</span>
+                    </td>
+                    <td data-label="Медиа">
                       <div class="vehicle-photo-actions">
-                        <span v-if="!item.photos.length">Нет</span>
+                        <span v-if="!item.photos.length && !item.videos.length">Нет</span>
                         <span v-for="photo in item.photos" :key="photo.id" class="vehicle-photo-chip">
                           <button type="button" @click="openPhoto(photo, 'defect')">
                             {{ photo.fileName }}
@@ -776,8 +1061,14 @@ function printReport() {
                             ×
                           </button>
                         </span>
-                        <label class="vehicle-photo-upload">
-                          + Добавить
+                        <span v-for="video in item.videos" :key="video.id" class="vehicle-photo-chip">
+                          <button type="button" @click="openMedia(video, 'defect-videos', 'video')">
+                            {{ video.fileName }}
+                          </button>
+                          <button class="vehicle-photo-delete" type="button" @click="deleteMedia(video.id, 'defect-videos')">×</button>
+                        </span>
+                        <label v-if="canCreateDefect" class="vehicle-photo-upload">
+                          + Фото
                           <input
                             accept="image/jpeg,image/png,image/webp"
                             multiple
@@ -785,32 +1076,90 @@ function printReport() {
                             @change="addPhotosToDefect(item.id, $event)"
                           />
                         </label>
+                        <label v-if="canCreateDefect" class="vehicle-photo-upload">
+                          + Видео
+                          <input
+                            accept="video/mp4,video/webm,video/quicktime"
+                            multiple
+                            type="file"
+                            @change="addVideos('defects', item.id, $event)"
+                          />
+                        </label>
                       </div>
                     </td>
-                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td class="vehicle-screen-only vehicle-row-action">
+                      <div class="vehicle-row-actions">
+                        <button
+                          v-if="canExecute && item.status === 'new'"
+                          class="primary-button"
+                          type="button"
+                          :disabled="isSaving"
+                          @click="claimDefect(item)"
+                        >
+                          Принять задание
+                        </button>
+                        <button
+                          v-if="canDeleteDefect(item)"
+                          class="table-action-button table-action-button--danger"
+                          type="button"
+                          :disabled="isSaving"
+                          @click="deleteDefect(item)"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
-              <table v-else-if="activeTab === 'hours'" class="vehicle-journal-table">
-                <thead><tr><th>Дата</th><th>Моточасы</th><th>Примечание</th><th class="vehicle-screen-only"></th></tr></thead>
+              <table v-else-if="section === 'requests'" class="vehicle-journal-table">
+                <thead><tr><th>Неисправность</th><th>Необходимые запчасти</th><th>Исполнитель</th><th>Заявка ОЗЧ</th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td data-label="Дата">{{ formatDate(item.readingDate) }}</td><td data-label="Моточасы">{{ formatNumber(item.engineHours) }}</td>
-                    <td data-label="Примечание">{{ item.note || '—' }}</td>
-                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
+                    <td data-label="Неисправность">
+                      {{ item.defectNodeName || item.cause || '—' }}
+                    </td>
+                    <td data-label="Необходимые запчасти">
+                      {{ item.requiredParts || '—' }}
+                    </td>
+                    <td data-label="Исполнитель">{{ item.performerName || '—' }}</td>
+                    <td data-label="Заявка ОЗЧ">
+                      <div v-if="canManageParts" class="vehicle-parts-request">
+                        <input v-model="partsRequestForms[item.id].requestNumber" placeholder="Номер заявки" />
+                        <input v-model="partsRequestForms[item.id].requestDate" type="date" />
+                        <input type="file" @change="partsRequestFiles[item.id] = $event.target.files[0]" />
+                        <button class="secondary-button" type="button" @click="savePartsRequest(item)">Сохранить</button>
+                      </div>
+                      <span v-else>{{ item.partsRequestNumber || '—' }}</span>
+                      <button
+                        v-if="item.partsRequestFileName"
+                        class="vehicle-media-link"
+                        type="button"
+                        @click="downloadPartsRequest(item)"
+                      >
+                        {{ item.partsRequestFileName }}
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
               <table v-else class="vehicle-journal-table vehicle-repairs-table">
-                <thead><tr><th>Неисправность / узел</th><th>Выполненные работы</th><th>№ заявки</th><th>Фото</th><th class="vehicle-screen-only"></th></tr></thead>
+                <thead><tr><th>Задание</th><th>Причина и работы</th><th>Статус / запчасти</th><th>Медиа</th></tr></thead>
                 <tbody>
                   <tr v-for="item in currentEntries" :key="item.id">
-                    <td data-label="Неисправность">{{ item.defectNodeName || 'Старая запись без привязки' }}</td>
-                    <td data-label="Работы">{{ item.description }}</td>
-                    <td data-label="№ заявки">{{ item.purchaseRequestNumber || '—' }}</td>
-                    <td data-label="Фото">
+                    <td data-label="Задание">{{ item.defectNodeName || 'Старая запись без привязки' }}</td>
+                    <td data-label="Работы">
+                      <strong>{{ item.cause || 'Причина не указана' }}</strong>
+                      <div>{{ item.description }}</div>
+                      <small>{{ item.performerName }}</small>
+                    </td>
+                    <td data-label="Статус">
+                      <strong>{{ statusLabel(item.status) }}</strong>
+                      <div v-if="item.requiredParts">{{ item.requiredParts }}</div>
+                    </td>
+                    <td data-label="Медиа">
                       <div class="vehicle-photo-actions">
-                        <span v-if="!item.photos.length">Нет</span>
+                        <span v-if="!item.photos.length && !item.videos.length">Нет</span>
                         <span v-for="photo in item.photos" :key="photo.id" class="vehicle-photo-chip">
                           <button type="button" @click="openPhoto(photo)">
                             {{ photo.fileName }}
@@ -824,18 +1173,14 @@ function printReport() {
                             ×
                           </button>
                         </span>
-                        <label class="vehicle-photo-upload">
-                          + Добавить
-                          <input
-                            accept="image/jpeg,image/png,image/webp"
-                            multiple
-                            type="file"
-                            @change="addPhotosToWork(item.id, $event)"
-                          />
-                        </label>
+                        <span v-for="video in item.videos" :key="video.id" class="vehicle-photo-chip">
+                          <button type="button" @click="openMedia(video, 'work-videos', 'video')">
+                            {{ video.fileName }}
+                          </button>
+                          <button class="vehicle-photo-delete" type="button" @click="deleteMedia(video.id, 'work-videos')">×</button>
+                        </span>
                       </div>
                     </td>
-                    <td class="vehicle-screen-only vehicle-row-action"><button class="table-action-button table-action-button--danger" @click="deleteEntry(item.id)">Удалить</button></td>
                   </tr>
                 </tbody>
               </table>
@@ -895,7 +1240,13 @@ function printReport() {
           <strong>{{ photoViewerName }}</strong>
           <button type="button" aria-label="Закрыть" @click="closePhoto">×</button>
         </div>
-        <img :src="photoViewerUrl" :alt="photoViewerName" />
+        <video
+          v-if="mediaViewerType === 'video'"
+          :src="photoViewerUrl"
+          controls
+          preload="metadata"
+        ></video>
+        <img v-else :src="photoViewerUrl" :alt="photoViewerName" />
       </div>
     </div>
   </main>

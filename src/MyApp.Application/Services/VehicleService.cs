@@ -9,16 +9,33 @@ using System.Text.RegularExpressions;
 
 namespace MyApp.Application.Services;
 
-public sealed class VehicleService(IVehicleRepository repository) : IVehicleService
+public sealed class VehicleService(
+    IVehicleRepository repository,
+    IUserRepository userRepository) : IVehicleService
 {
     private const int MaximumPhotosPerEntry = 10;
     private const int MaximumPhotoSize = 8 * 1024 * 1024;
+    private const int MaximumVideoSize = 100 * 1024 * 1024;
+    private const int MaximumRequestFileSize = 20 * 1024 * 1024;
     private static readonly HashSet<string> AllowedPhotoTypes =
     [
         "image/jpeg",
         "image/png",
         "image/webp"
     ];
+    private static readonly HashSet<string> AllowedVideoTypes =
+    [
+        "video/mp4",
+        "video/webm",
+        "video/quicktime"
+    ];
+    private static readonly HashSet<string> ExecutorProfessions = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        "Слесарь",
+        "Электрослесарь",
+        "Сервисный инженер"
+    };
     private static readonly (Regex Pattern, string Model)[] ExcelVehiclePatterns =
     [
         (new(@"^SET\s*(?<garage>\d+)$",
@@ -75,33 +92,67 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
                 cancellationToken),
             cancellationToken);
 
-    public Task<ServiceResult<Guid>> AddDefectAsync(
+    public async Task<ServiceResult<Guid>> AddDefectAsync(
         Guid vehicleId,
         VehicleDefectRequest request,
         Guid createdBy,
-        CancellationToken cancellationToken) =>
-        CreateAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!await HasProfessionAsync(
+                createdBy, ["Механик"], cancellationToken))
+        {
+            return ServiceResult<Guid>.Unauthorized();
+        }
+        var symptoms = Clean(request.Symptoms);
+        var downtimeStartedAt = request.DowntimeStartedAt;
+        return await CreateAsync(
             vehicleId,
-            ValidateDefect(request),
+            ValidateDefect(request, symptoms, downtimeStartedAt),
             () => repository.AddDefectAsync(
                 vehicleId,
                 request with
                 {
-                    NodeName = Clean(request.NodeName),
-                    FailureReason = Clean(request.FailureReason)
+                    ErrorCode = Clean(request.ErrorCode),
+                    Symptoms = symptoms
                 },
                 createdBy,
                 cancellationToken),
             cancellationToken);
+    }
+
+    public async Task<ServiceResult<bool>> ClaimDefectAsync(
+        Guid defectId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasProfessionAsync(
+                userId, ExecutorProfessions, cancellationToken))
+        {
+            return ServiceResult<bool>.Unauthorized();
+        }
+        if (!await repository.DefectExistsAsync(defectId, cancellationToken))
+        {
+            return ServiceResult<bool>.NotFound();
+        }
+        return await repository.ClaimDefectAsync(
+            defectId, userId, cancellationToken)
+            ? ServiceResult<bool>.Success(true)
+            : ServiceResult<bool>.Conflict("Задача уже назначена.");
+    }
 
     public async Task<ServiceResult<IReadOnlyList<Guid>>> AddDefectPhotosAsync(
         Guid defectId,
         IReadOnlyList<VehicleWorkPhotoUpload> photos,
+        Guid userId,
         CancellationToken cancellationToken)
     {
         if (!await repository.DefectExistsAsync(defectId, cancellationToken))
         {
             return ServiceResult<IReadOnlyList<Guid>>.NotFound();
+        }
+        if (!await CanManageDefectAsync(defectId, userId, cancellationToken))
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.Unauthorized();
         }
         var validation = await ValidatePhotosAsync(
             photos,
@@ -118,10 +169,41 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         CancellationToken cancellationToken) =>
         repository.GetDefectPhotoAsync(photoId, cancellationToken);
 
-    public Task<bool> DeleteDefectPhotoAsync(
+    public Task<ServiceResult<bool>> DeleteDefectPhotoAsync(
         Guid photoId,
+        Guid userId,
         CancellationToken cancellationToken) =>
-        repository.DeleteDefectPhotoAsync(photoId, cancellationToken);
+        DeleteMediaAsync(
+            "defect-photo", photoId, userId,
+            repository.DeleteDefectPhotoAsync, cancellationToken);
+
+    public Task<ServiceResult<IReadOnlyList<Guid>>> AddDefectVideosAsync(
+        Guid defectId,
+        IReadOnlyList<VehicleMediaUpload> videos,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        AddVideosAsync(
+            defectId,
+            videos,
+            userId,
+            repository.DefectExistsAsync,
+            CanManageDefectAsync,
+            repository.GetDefectVideoCountAsync,
+            repository.AddDefectVideosAsync,
+            cancellationToken);
+
+    public Task<VehicleWorkPhotoContent?> GetDefectVideoAsync(
+        Guid videoId,
+        CancellationToken cancellationToken) =>
+        repository.GetDefectVideoAsync(videoId, cancellationToken);
+
+    public Task<ServiceResult<bool>> DeleteDefectVideoAsync(
+        Guid videoId,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        DeleteMediaAsync(
+            "defect-video", videoId, userId,
+            repository.DeleteDefectVideoAsync, cancellationToken);
 
     public Task<ServiceResult<Guid>> AddHoursAsync(
         Guid vehicleId,
@@ -212,6 +294,37 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         Guid createdBy,
         CancellationToken cancellationToken)
     {
+        if (!await repository.DefectBelongsToVehicleAsync(
+                request.DefectId, vehicleId, cancellationToken))
+        {
+            return ServiceResult<Guid>.NotFound();
+        }
+        return await CompleteDefectAsync(
+            request.DefectId, request, createdBy, cancellationToken);
+    }
+
+    public async Task<ServiceResult<Guid>> CompleteDefectAsync(
+        Guid defectId,
+        VehicleWorkRequest request,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        if (user is null || !IsAdministrator(user) &&
+            !ExecutorProfessions.Contains(user.Profession.Name.Trim()))
+        {
+            return ServiceResult<Guid>.Unauthorized();
+        }
+        request = request with { DefectId = defectId };
+        var cause = Clean(request.Cause);
+        var status = Clean(request.Status).ToLowerInvariant();
+        request = request with
+        {
+            Description = Clean(request.Description),
+            Cause = cause,
+            Status = status,
+            RequiredParts = Clean(request.RequiredParts)
+        };
         var validation = ValidateWork(request);
         if (validation is not null)
         {
@@ -221,37 +334,48 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
                     ["vehicle"] = [validation]
                 });
         }
-        if (!await repository.VehicleExistsAsync(vehicleId, cancellationToken) ||
-            !await repository.DefectBelongsToVehicleAsync(
-                request.DefectId, vehicleId, cancellationToken))
+        if (!await repository.DefectExistsAsync(defectId, cancellationToken))
         {
             return ServiceResult<Guid>.NotFound();
         }
-        return ServiceResult<Guid>.Success(await repository.AddWorkAsync(
-            vehicleId,
-            request with
-            {
-                Description = Clean(request.Description),
-                PurchaseRequestNumber = Clean(request.PurchaseRequestNumber)
-            },
-            createdBy,
-            cancellationToken));
+        var id = await repository.CompleteDefectAsync(
+            defectId, request, userId, IsAdministrator(user), cancellationToken);
+        return id.HasValue
+            ? ServiceResult<Guid>.Success(id.Value)
+            : ServiceResult<Guid>.Conflict(
+                "Задача не назначена вам или уже завершена.");
     }
 
-    public Task<bool> DeleteEntryAsync(
+    public async Task<bool> DeleteEntryAsync(
         string category,
         Guid id,
-        CancellationToken cancellationToken) =>
-        repository.DeleteEntryAsync(category, id, cancellationToken);
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        if (category == "defects" &&
+            !await CanManageDefectAsync(id, userId, cancellationToken) ||
+            category == "works" &&
+            !await CanManageWorkAsync(id, userId, cancellationToken))
+        {
+            return false;
+        }
+        return await repository.DeleteEntryAsync(
+            category, id, cancellationToken);
+    }
 
     public async Task<ServiceResult<IReadOnlyList<Guid>>> AddWorkPhotosAsync(
         Guid workId,
         IReadOnlyList<VehicleWorkPhotoUpload> photos,
+        Guid userId,
         CancellationToken cancellationToken)
     {
         if (!await repository.WorkExistsAsync(workId, cancellationToken))
         {
             return ServiceResult<IReadOnlyList<Guid>>.NotFound();
+        }
+        if (!await CanManageWorkAsync(workId, userId, cancellationToken))
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.Unauthorized();
         }
         var validation = await ValidatePhotosAsync(
             photos,
@@ -268,10 +392,92 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         CancellationToken cancellationToken) =>
         repository.GetWorkPhotoAsync(photoId, cancellationToken);
 
-    public Task<bool> DeleteWorkPhotoAsync(
+    public Task<ServiceResult<bool>> DeleteWorkPhotoAsync(
         Guid photoId,
+        Guid userId,
         CancellationToken cancellationToken) =>
-        repository.DeleteWorkPhotoAsync(photoId, cancellationToken);
+        DeleteMediaAsync(
+            "work-photo", photoId, userId,
+            repository.DeleteWorkPhotoAsync, cancellationToken);
+
+    public Task<ServiceResult<IReadOnlyList<Guid>>> AddWorkVideosAsync(
+        Guid workId,
+        IReadOnlyList<VehicleMediaUpload> videos,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        AddVideosAsync(
+            workId,
+            videos,
+            userId,
+            repository.WorkExistsAsync,
+            CanManageWorkAsync,
+            repository.GetWorkVideoCountAsync,
+            repository.AddWorkVideosAsync,
+            cancellationToken);
+
+    public Task<VehicleWorkPhotoContent?> GetWorkVideoAsync(
+        Guid videoId,
+        CancellationToken cancellationToken) =>
+        repository.GetWorkVideoAsync(videoId, cancellationToken);
+
+    public Task<ServiceResult<bool>> DeleteWorkVideoAsync(
+        Guid videoId,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        DeleteMediaAsync(
+            "work-video", videoId, userId,
+            repository.DeleteWorkVideoAsync, cancellationToken);
+
+    public async Task<ServiceResult<bool>> UpdatePartsRequestAsync(
+        Guid workId,
+        VehiclePartsRequest request,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasProfessionAsync(
+                userId, ["Старший механик"], cancellationToken))
+        {
+            return ServiceResult<bool>.Unauthorized();
+        }
+        var errors = new Dictionary<string, string[]>();
+        if (Clean(request.RequestNumber).Length is < 1 or > 100)
+        {
+            errors[nameof(request.RequestNumber)] =
+                ["Укажите номер заявки длиной не более 100 символов."];
+        }
+        if (request.Content is { Length: > MaximumRequestFileSize })
+        {
+            errors["file"] = ["Размер файла не должен превышать 20 МБ."];
+        }
+        if (request.Content is { Length: > 0 } &&
+            string.IsNullOrWhiteSpace(request.FileName))
+        {
+            errors["file"] = ["Укажите имя файла."];
+        }
+        if (errors.Count > 0)
+        {
+            return ServiceResult<bool>.Validation(errors);
+        }
+        var updated = await repository.UpdatePartsRequestAsync(
+            workId,
+            request with
+            {
+                RequestNumber = Clean(request.RequestNumber),
+                FileName = request.FileName is null
+                    ? null
+                    : SafeFileName(request.FileName)
+            },
+            cancellationToken);
+        return updated
+            ? ServiceResult<bool>.Success(true)
+            : ServiceResult<bool>.Conflict(
+                "Заявку можно добавить только к работе со статусом awaiting_parts.");
+    }
+
+    public Task<VehicleRequestFileContent?> GetPartsRequestFileAsync(
+        Guid workId,
+        CancellationToken cancellationToken) =>
+        repository.GetPartsRequestFileAsync(workId, cancellationToken);
 
     private async Task<ServiceResult<Guid>> CreateAsync(
         Guid vehicleId,
@@ -307,9 +513,18 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         return null;
     }
 
-    private static string? ValidateDefect(VehicleDefectRequest request) =>
-        ValidateText(request.NodeName, "Узел")
-        ?? ValidateText(request.FailureReason, "Причина неисправности");
+    private static string? ValidateDefect(
+        VehicleDefectRequest request,
+        string symptoms,
+        DateTimeOffset downtimeStartedAt) =>
+        ValidateText(symptoms, "Симптомы")
+        ?? (Clean(request.ErrorCode).Length > 100
+            ? "Код ошибки не должен превышать 100 символов."
+            : downtimeStartedAt == default
+                ? "Укажите время начала простоя."
+                : downtimeStartedAt > DateTimeOffset.UtcNow.AddMinutes(5)
+                    ? "Время начала простоя не может быть в будущем."
+                    : null);
 
     private static string? ValidateWork(VehicleWorkRequest request)
     {
@@ -318,9 +533,15 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
             return "Выберите неисправность.";
         }
         var description = ValidateText(request.Description, "Выполненные работы");
-        return description ?? (Clean(request.PurchaseRequestNumber).Length > 100
-            ? "Номер заявки не должен превышать 100 символов."
-            : null);
+        var failure = ValidateText(request.Cause, "Причина отказа");
+        var status = Clean(request.Status);
+        return description ?? failure ??
+            (status is not ("repaired" or "faulty" or "awaiting_parts")
+                ? "Статус должен быть repaired, faulty или awaiting_parts."
+                : status == "awaiting_parts" &&
+                  Clean(request.RequiredParts).Length == 0
+                    ? "Для статуса awaiting_parts укажите необходимые запчасти."
+                    : null);
     }
 
     private static string? ValidateText(string value, string label) =>
@@ -329,6 +550,13 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
             : null;
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
+
+    private static string SafeFileName(string value)
+    {
+        var name = value.Replace('\\', '/').Split('/').Last();
+        name = new string(name.Where(character => !char.IsControl(character)).ToArray());
+        return name.Length <= 255 ? name : name[..255];
+    }
 
     private static async Task<string?> ValidatePhotosAsync(
         IReadOnlyList<VehicleWorkPhotoUpload> photos,
@@ -344,7 +572,8 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         }
         return photos.Any(photo =>
             photo.Content.Length is <= 0 or > MaximumPhotoSize ||
-            !AllowedPhotoTypes.Contains(photo.ContentType))
+            !AllowedPhotoTypes.Contains(photo.ContentType) ||
+            !HasValidImageSignature(photo.ContentType, photo.Content))
             ? "Разрешены JPEG, PNG и WebP размером не более 8 МБ."
             : null;
     }
@@ -566,6 +795,144 @@ public sealed class VehicleService(IVehicleRepository repository) : IVehicleServ
         string message) =>
         ServiceResult<IReadOnlyList<Guid>>.Validation(
             new Dictionary<string, string[]> { ["photos"] = [message] });
+
+    private async Task<bool> HasProfessionAsync(
+        Guid userId,
+        IEnumerable<string> professions,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        return user is not null &&
+            (IsAdministrator(user) ||
+             professions.Contains(
+                 user.Profession.Name.Trim(),
+                 StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsAdministrator(MyApp.Domain.Entities.User user) =>
+        user.Role.Trim().Equals(
+            "administrator", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<ServiceResult<IReadOnlyList<Guid>>> AddVideosAsync(
+        Guid parentId,
+        IReadOnlyList<VehicleMediaUpload> videos,
+        Guid userId,
+        Func<Guid, CancellationToken, Task<bool>> exists,
+        Func<Guid, Guid, CancellationToken, Task<bool>> canManage,
+        Func<Guid, CancellationToken, Task<int>> count,
+        Func<Guid, IReadOnlyList<VehicleMediaUpload>, CancellationToken,
+            Task<IReadOnlyList<Guid>>> add,
+        CancellationToken cancellationToken)
+    {
+        if (!await exists(parentId, cancellationToken))
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.NotFound();
+        }
+        if (!await canManage(parentId, userId, cancellationToken))
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.Unauthorized();
+        }
+        if (videos.Count == 0 ||
+            await count(parentId, cancellationToken) + videos.Count >
+                MaximumPhotosPerEntry)
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.Validation(
+                new Dictionary<string, string[]>
+                {
+                    ["videos"] = ["Можно сохранить от 1 до 10 видео."]
+                });
+        }
+        if (videos.Any(video =>
+                video.Content.Length is <= 0 or > MaximumVideoSize ||
+                !AllowedVideoTypes.Contains(video.ContentType) ||
+                !HasValidVideoSignature(video.ContentType, video.Content)))
+        {
+            return ServiceResult<IReadOnlyList<Guid>>.Validation(
+                new Dictionary<string, string[]>
+                {
+                    ["videos"] =
+                        ["Разрешены MP4, WebM и QuickTime размером не более 100 МБ."]
+                });
+        }
+        return ServiceResult<IReadOnlyList<Guid>>.Success(
+            await add(parentId, videos, cancellationToken));
+    }
+
+    private static bool HasValidImageSignature(
+        string contentType,
+        byte[] content) =>
+        contentType switch
+        {
+            "image/jpeg" => content.Length >= 3 &&
+                content[0] == 0xff && content[1] == 0xd8 && content[2] == 0xff,
+            "image/png" => content.Length >= 8 &&
+                content.AsSpan(0, 8).SequenceEqual(
+                    new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }),
+            "image/webp" => content.Length >= 12 &&
+                content.AsSpan(0, 4).SequenceEqual("RIFF"u8) &&
+                content.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => false
+        };
+
+    private static bool HasValidVideoSignature(
+        string contentType,
+        byte[] content) =>
+        contentType switch
+        {
+            "video/webm" => content.Length >= 4 &&
+                content.AsSpan(0, 4).SequenceEqual(
+                    new byte[] { 0x1a, 0x45, 0xdf, 0xa3 }),
+            "video/mp4" or "video/quicktime" => content.Length >= 12 &&
+                content.AsSpan(4, 4).SequenceEqual("ftyp"u8),
+            _ => false
+        };
+
+    private async Task<bool> CanManageDefectAsync(
+        Guid defectId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        return user is not null &&
+            (IsAdministrator(user) ||
+             user.Profession.Name.Trim().Equals(
+                 "Механик", StringComparison.OrdinalIgnoreCase) &&
+             await repository.IsDefectCreatorAsync(
+                 defectId, userId, cancellationToken));
+    }
+
+    private async Task<bool> CanManageWorkAsync(
+        Guid workId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        return user is not null &&
+            (IsAdministrator(user) ||
+             ExecutorProfessions.Contains(user.Profession.Name.Trim()) &&
+             await repository.IsWorkPerformerAsync(
+                 workId, userId, cancellationToken));
+    }
+
+    private async Task<ServiceResult<bool>> DeleteMediaAsync(
+        string category,
+        Guid mediaId,
+        Guid userId,
+        Func<Guid, CancellationToken, Task<bool>> delete,
+        CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindByIdAsync(userId, cancellationToken);
+        if (user is null ||
+            !IsAdministrator(user) &&
+            !await repository.CanManageMediaAsync(
+                category, mediaId, userId, cancellationToken))
+        {
+            return ServiceResult<bool>.Unauthorized();
+        }
+        return await delete(mediaId, cancellationToken)
+            ? ServiceResult<bool>.Success(true)
+            : ServiceResult<bool>.NotFound();
+    }
 
     private sealed record VehicleHoursImportRow(
         int Line,

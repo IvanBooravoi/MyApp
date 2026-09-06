@@ -26,6 +26,7 @@ const isNavigationCollapsed = ref(false)
 const currentPage = ref('home')
 const currentTable = ref('v_full_ost')
 const currentSettings = ref('users')
+const currentVehicleSection = ref('defects')
 const selectedComponentRows = ref([])
 const selectedResponsibleEmployee = ref(null)
 const profileVersion = ref(0)
@@ -62,6 +63,11 @@ function openTable(tableName) {
 function openSettings(section) {
   currentSettings.value = section
   currentPage.value = 'settings'
+}
+
+function openVehicleSection(section) {
+  currentVehicleSection.value = section
+  currentPage.value = 'vehicles'
 }
 
 function openSelectedComponents() {
@@ -106,6 +112,7 @@ function updateSelectedComponentRows(rows) {
       :active-page="currentPage"
       :active-table="currentTable"
       :active-settings="currentSettings"
+      :active-vehicle-section="currentVehicleSection"
       :is-admin="role === 'administrator'"
       :selected-components-count="selectedComponentRows.length"
       :token="token"
@@ -115,6 +122,7 @@ function updateSelectedComponentRows(rows) {
       @navigate-table="openTable"
       @navigate-selected-components="openSelectedComponents"
       @navigate-settings="openSettings"
+      @navigate-vehicle="openVehicleSection"
       @logout="handleLogout"
     />
     <HomeView
@@ -160,7 +168,10 @@ function updateSelectedComponentRows(rows) {
     <VehicleJournalView
       v-else-if="currentPage === 'vehicles'"
       :navigation-collapsed="isNavigationCollapsed"
+      :role="role"
+      :section="currentVehicleSection"
       :token="token"
+      @navigate-section="openVehicleSection"
     />
     <SettingsView
       v-else-if="currentPage === 'settings' && role === 'administrator'"

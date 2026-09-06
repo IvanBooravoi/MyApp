@@ -28,14 +28,26 @@ public sealed record VehiclePurchaseResponse(
     DateTimeOffset CreatedAt);
 
 public sealed record VehicleDefectRequest(
-    string NodeName,
-    string FailureReason);
+    string? ErrorCode,
+    string Symptoms,
+    DateTimeOffset DowntimeStartedAt);
 
 public sealed record VehicleDefectResponse(
     Guid Id,
-    string NodeName,
-    string FailureReason,
-    IReadOnlyList<VehicleWorkPhotoResponse> Photos);
+    string ErrorCode,
+    string Symptoms,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset DowntimeStartedAt,
+    Guid CreatedById,
+    string CreatedByName,
+    Guid? AssignedToId,
+    string AssignedToName,
+    DateTimeOffset? RepairStartedAt,
+    IReadOnlyList<VehicleWorkPhotoResponse> Photos,
+    IReadOnlyList<VehicleMediaResponse> Videos,
+    string NodeName = "",
+    string FailureReason = "");
 
 public sealed record VehicleHoursRequest(
     DateOnly ReadingDate,
@@ -63,8 +75,10 @@ public sealed record VehicleHoursImportResponse(
 
 public sealed record VehicleWorkRequest(
     Guid DefectId,
+    string Cause,
     string Description,
-    string PurchaseRequestNumber);
+    string Status,
+    string? RequiredParts);
 
 public sealed record VehicleWorkResponse(
     Guid Id,
@@ -73,7 +87,19 @@ public sealed record VehicleWorkResponse(
     string Description,
     string PurchaseRequestNumber,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<VehicleWorkPhotoResponse> Photos);
+    IReadOnlyList<VehicleWorkPhotoResponse> Photos,
+    string Cause = "",
+    string Status = "",
+    string RequiredParts = "",
+    Guid? PerformedBy = null,
+    string PerformerName = "",
+    DateTimeOffset? CompletedAt = null,
+    string PartsRequestNumber = "",
+    DateOnly? PartsRequestDate = null,
+    string PartsRequestFileName = "",
+    string PurchaseRequestContentType = "",
+    bool HasPurchaseRequestFile = false,
+    IReadOnlyList<VehicleMediaResponse>? Videos = null);
 
 public sealed record VehicleWorkPhotoResponse(
     Guid Id,
@@ -87,6 +113,30 @@ public sealed record VehicleWorkPhotoUpload(
     byte[] Content);
 
 public sealed record VehicleWorkPhotoContent(
+    string FileName,
+    string ContentType,
+    byte[] Content,
+    string? StoragePath = null);
+
+public sealed record VehicleMediaResponse(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    long Size);
+
+public sealed record VehicleMediaUpload(
+    string FileName,
+    string ContentType,
+    byte[] Content);
+
+public sealed record VehiclePartsRequest(
+    string RequestNumber,
+    DateOnly RequestDate,
+    string? FileName,
+    string? ContentType,
+    byte[]? Content);
+
+public sealed record VehicleRequestFileContent(
     string FileName,
     string ContentType,
     byte[] Content);

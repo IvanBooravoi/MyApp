@@ -19,6 +19,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  activeVehicleSection: {
+    type: String,
+    required: true,
+  },
   isAdmin: {
     type: Boolean,
     required: true,
@@ -37,9 +41,11 @@ const emit = defineEmits([
   'navigate-table',
   'navigate-selected-components',
   'navigate-settings',
+  'navigate-vehicle',
   'logout',
 ])
 const isTablesExpanded = ref(false)
+const isVehiclesExpanded = ref(false)
 const isSettingsExpanded = ref(false)
 const profile = ref(null)
 const avatarUrl = ref('')
@@ -77,6 +83,16 @@ function toggleTables() {
   }
 
   isTablesExpanded.value = !isTablesExpanded.value
+}
+
+function toggleVehicles() {
+  if (props.collapsed) {
+    emit('toggle')
+    isVehiclesExpanded.value = true
+    return
+  }
+
+  isVehiclesExpanded.value = !isVehiclesExpanded.value
 }
 
 function toggleSettings() {
@@ -153,14 +169,72 @@ function toggleSettings() {
         class="nav-link"
         :class="{ 'nav-link--active': activePage === 'vehicles' }"
         type="button"
-        :aria-current="activePage === 'vehicles' ? 'page' : undefined"
-        @click="$emit('navigate', 'vehicles')"
+        :aria-expanded="isVehiclesExpanded"
+        aria-controls="vehicles-submenu"
+        @click="toggleVehicles"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 16V9l2-4h10l2 4v7M4 12h16M7 16v3M17 16v3M7.5 9h9M8 14h.01M16 14h.01" />
         </svg>
         <span class="sidebar-label">Техника</span>
+        <span
+          class="sidebar-label submenu-chevron"
+          :class="{ 'submenu-chevron--expanded': isVehiclesExpanded }"
+          aria-hidden="true"
+        >
+          ›
+        </span>
       </button>
+      <div
+        v-if="!collapsed && isVehiclesExpanded"
+        id="vehicles-submenu"
+        class="nav-submenu"
+      >
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'vehicles' && activeVehicleSection === 'defects',
+          }"
+          type="button"
+          @click="$emit('navigate-vehicle', 'defects')"
+        >
+          Неисправность
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'vehicles' && activeVehicleSection === 'works',
+          }"
+          type="button"
+          @click="$emit('navigate-vehicle', 'works')"
+        >
+          Ремонт
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'vehicles' && activeVehicleSection === 'requests',
+          }"
+          type="button"
+          @click="$emit('navigate-vehicle', 'requests')"
+        >
+          Заявка
+        </button>
+        <button
+          class="nav-submenu-link"
+          :class="{
+            'nav-submenu-link--active':
+              activePage === 'vehicles' && activeVehicleSection === 'hours',
+          }"
+          type="button"
+          @click="$emit('navigate-vehicle', 'hours')"
+        >
+          Моточасы
+        </button>
+      </div>
       <button
         class="nav-link"
         :class="{ 'nav-link--active': activePage === 'tables' || activePage === 'selected-components' }"

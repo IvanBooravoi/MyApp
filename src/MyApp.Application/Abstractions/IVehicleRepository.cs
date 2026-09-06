@@ -34,6 +34,13 @@ public interface IVehicleRepository
         Guid vehicleId,
         CancellationToken cancellationToken);
 
+    Task<bool> ClaimDefectAsync(
+        Guid defectId,
+        Guid userId,
+        CancellationToken cancellationToken);
+    Task<bool> IsDefectCreatorAsync(
+        Guid defectId, Guid userId, CancellationToken cancellationToken);
+
     Task<int> GetDefectPhotoCountAsync(
         Guid defectId,
         CancellationToken cancellationToken);
@@ -50,6 +57,14 @@ public interface IVehicleRepository
     Task<bool> DeleteDefectPhotoAsync(
         Guid photoId,
         CancellationToken cancellationToken);
+
+    Task<int> GetDefectVideoCountAsync(Guid defectId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Guid>> AddDefectVideosAsync(
+        Guid defectId, IReadOnlyList<VehicleMediaUpload> videos,
+        CancellationToken cancellationToken);
+    Task<VehicleWorkPhotoContent?> GetDefectVideoAsync(
+        Guid videoId, CancellationToken cancellationToken);
+    Task<bool> DeleteDefectVideoAsync(Guid videoId, CancellationToken cancellationToken);
 
     Task<Guid> AddHoursAsync(
         Guid vehicleId,
@@ -69,7 +84,19 @@ public interface IVehicleRepository
         Guid createdBy,
         CancellationToken cancellationToken);
 
+    Task<Guid?> CompleteDefectAsync(
+        Guid defectId,
+        VehicleWorkRequest request,
+        Guid performedBy,
+        bool administrator,
+        CancellationToken cancellationToken);
+
     Task<bool> WorkExistsAsync(Guid workId, CancellationToken cancellationToken);
+    Task<bool> IsWorkPerformerAsync(
+        Guid workId, Guid userId, CancellationToken cancellationToken);
+    Task<bool> CanManageMediaAsync(
+        string category, Guid mediaId, Guid userId,
+        CancellationToken cancellationToken);
 
     Task<int> GetWorkPhotoCountAsync(
         Guid workId,
@@ -86,6 +113,22 @@ public interface IVehicleRepository
 
     Task<bool> DeleteWorkPhotoAsync(
         Guid photoId,
+        CancellationToken cancellationToken);
+
+    Task<int> GetWorkVideoCountAsync(Guid workId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Guid>> AddWorkVideosAsync(
+        Guid workId, IReadOnlyList<VehicleMediaUpload> videos,
+        CancellationToken cancellationToken);
+    Task<VehicleWorkPhotoContent?> GetWorkVideoAsync(
+        Guid videoId, CancellationToken cancellationToken);
+    Task<bool> DeleteWorkVideoAsync(Guid videoId, CancellationToken cancellationToken);
+
+    Task<bool> UpdatePartsRequestAsync(
+        Guid workId,
+        VehiclePartsRequest request,
+        CancellationToken cancellationToken);
+    Task<VehicleRequestFileContent?> GetPartsRequestFileAsync(
+        Guid workId,
         CancellationToken cancellationToken);
 
     Task<bool> DeleteEntryAsync(

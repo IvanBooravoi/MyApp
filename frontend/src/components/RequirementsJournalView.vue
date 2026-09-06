@@ -22,6 +22,7 @@ const deletingId = ref(null)
 const dateFilter = ref('')
 const itemNameFilter = ref('')
 const recipientFilter = ref('')
+const vehicleNumberFilter = ref('')
 
 const dateTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
   dateStyle: 'short',
@@ -34,6 +35,7 @@ const quantityFormatter = new Intl.NumberFormat('ru-RU', {
 const filteredRequirements = computed(() => {
   const itemName = itemNameFilter.value.trim().toLocaleLowerCase('ru-RU')
   const recipient = recipientFilter.value.trim().toLocaleLowerCase('ru-RU')
+  const vehicleNumber = normalizeVehicleNumber(vehicleNumberFilter.value)
 
   return requirements.value.filter((requirement) => {
     if (
@@ -50,6 +52,13 @@ const filteredRequirements = computed(() => {
       return false
     }
 
+    if (
+      vehicleNumber &&
+      !normalizeVehicleNumber(requirement.vehicleNumber).includes(vehicleNumber)
+    ) {
+      return false
+    }
+
     return (
       !itemName ||
       requirement.items.some((item) =>
@@ -58,6 +67,17 @@ const filteredRequirements = computed(() => {
     )
   })
 })
+
+function normalizeVehicleNumber(value) {
+  const lookalikes = {
+    А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H',
+    О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
+  }
+  return String(value ?? '')
+    .toLocaleUpperCase('ru-RU')
+    .replace(/[АВЕКМНОРСТУХ]/g, (letter) => lookalikes[letter])
+    .replace(/[^A-Z0-9]/g, '')
+}
 
 function formatDateTime(value) {
   const date = new Date(value)
@@ -85,6 +105,7 @@ function clearFilters() {
   dateFilter.value = ''
   itemNameFilter.value = ''
   recipientFilter.value = ''
+  vehicleNumberFilter.value = ''
 }
 
 async function loadRequirements() {
@@ -220,6 +241,14 @@ onMounted(loadRequirements)
           <input v-model="dateFilter" type="date" />
         </label>
         <label>
+          <span>Номер техники</span>
+          <input
+            v-model="vehicleNumberFilter"
+            type="search"
+            placeholder="Гаражный или гос. номер"
+          />
+        </label>
+        <label>
           <span>Наименование</span>
           <input
             v-model="itemNameFilter"
@@ -238,7 +267,12 @@ onMounted(loadRequirements)
         <button
           class="secondary-button"
           type="button"
-          :disabled="!dateFilter && !itemNameFilter && !recipientFilter"
+          :disabled="
+            !dateFilter &&
+            !vehicleNumberFilter &&
+            !itemNameFilter &&
+            !recipientFilter
+          "
           @click="clearFilters"
         >
           Сбросить

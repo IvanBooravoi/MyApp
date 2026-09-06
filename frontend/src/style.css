@@ -990,6 +990,13 @@ button {
   color: var(--system-red);
 }
 
+.vehicle-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .tables-layout {
   display: block;
 }
@@ -1191,7 +1198,10 @@ button {
 
 .requirements-journal-filters {
   display: grid;
-  grid-template-columns: minmax(170px, 0.7fr) repeat(2, minmax(220px, 1fr)) auto;
+  grid-template-columns:
+    minmax(170px, 0.7fr)
+    repeat(3, minmax(190px, 1fr))
+    auto;
   align-items: end;
   gap: 12px;
   margin-bottom: 18px;
@@ -1600,7 +1610,7 @@ button {
 }
 
 .vehicle-defects-table {
-  min-width: 760px;
+  min-width: 1000px;
   table-layout: fixed;
 }
 
@@ -1613,20 +1623,40 @@ button {
   white-space: normal;
 }
 
-.vehicle-defects-table th:first-child {
-  width: 30%;
+.vehicle-defects-table th:nth-child(1) {
+  width: 10%;
 }
 
 .vehicle-defects-table th:nth-child(2) {
-  width: 42%;
+  width: 30%;
 }
 
 .vehicle-defects-table th:nth-child(3) {
-  width: 18%;
+  width: 10%;
 }
 
-.vehicle-defects-table th:last-child {
-  width: 90px;
+.vehicle-defects-table th:nth-child(4) {
+  width: 20%;
+}
+
+.vehicle-defects-table th:nth-child(4),
+.vehicle-defects-table td:nth-child(4) {
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+.vehicle-journal .vehicle-journal-table thead th {
+  text-align: center;
+  vertical-align: top;
+}
+
+.vehicle-defects-table th:nth-child(5) {
+  width: 15%;
+}
+
+.vehicle-defects-table th:nth-child(6) {
+  width: 15%;
 }
 
 .vehicle-repairs-table {
@@ -1755,6 +1785,38 @@ button {
   width: 100%;
   max-height: calc(92vh - 80px);
   object-fit: contain;
+}
+
+.vehicle-photo-viewer-card video {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  background: #000;
+}
+
+.vehicle-parts-request {
+  display: grid;
+  min-width: 220px;
+  gap: 7px;
+}
+
+.vehicle-parts-request input {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-main);
+  background: var(--bg-surface);
+}
+
+.vehicle-media-link {
+  display: block;
+  padding: 4px 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  text-align: left;
+  text-decoration: underline;
 }
 
 .vehicle-hours-import {
@@ -2005,6 +2067,10 @@ button {
   .vehicle-journal-table .vehicle-row-action button {
     width: 100%;
     min-height: 38px;
+  }
+
+  .vehicle-row-actions {
+    flex-direction: column;
   }
 
   .vehicle-photo-actions {

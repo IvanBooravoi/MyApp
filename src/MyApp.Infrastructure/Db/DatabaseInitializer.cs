@@ -363,13 +363,29 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                 vehicle_id uuid NOT NULL REFERENCES number_car(id) ON DELETE CASCADE,
                 node_name text NOT NULL DEFAULT '',
                 failure_reason text NOT NULL DEFAULT '',
+                error_code varchar(100) NOT NULL DEFAULT '',
+                symptoms text NOT NULL DEFAULT '',
+                downtime_started_at timestamptz NOT NULL DEFAULT NOW(),
+                assigned_to uuid REFERENCES app_users(id) ON DELETE RESTRICT,
+                repair_started_at timestamptz,
                 created_by uuid NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
                 created_at timestamptz NOT NULL DEFAULT NOW()
             );
 
             ALTER TABLE vehicle_defects
                 ADD COLUMN IF NOT EXISTS node_name text NOT NULL DEFAULT '',
-                ADD COLUMN IF NOT EXISTS failure_reason text NOT NULL DEFAULT '';
+                ADD COLUMN IF NOT EXISTS failure_reason text NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS error_code varchar(100) NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS symptoms text NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS downtime_started_at timestamptz
+                    NOT NULL DEFAULT NOW(),
+                ADD COLUMN IF NOT EXISTS assigned_to uuid
+                    REFERENCES app_users(id) ON DELETE RESTRICT,
+                ADD COLUMN IF NOT EXISTS repair_started_at timestamptz;
+
+            UPDATE vehicle_defects
+            SET symptoms = failure_reason
+            WHERE symptoms = '';
 
             DO $$
             BEGIN
@@ -407,13 +423,6 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
             END
             $$;
 
-            ALTER TABLE vehicle_defects
-                DROP COLUMN IF EXISTS defect_date,
-                DROP COLUMN IF EXISTS description,
-                DROP COLUMN IF EXISTS status,
-                DROP COLUMN IF EXISTS resolved_date,
-                DROP COLUMN IF EXISTS part_article;
-
             CREATE TABLE IF NOT EXISTS vehicle_hour_readings (
                 id uuid PRIMARY KEY,
                 vehicle_id uuid NOT NULL REFERENCES number_car(id) ON DELETE CASCADE,
@@ -434,6 +443,15 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                 note text NOT NULL DEFAULT '',
                 defect_id uuid REFERENCES vehicle_defects(id) ON DELETE CASCADE,
                 purchase_request_number varchar(100) NOT NULL DEFAULT '',
+                purchase_request_date date,
+                purchase_request_file_name varchar(255),
+                purchase_request_content_type varchar(100),
+                purchase_request_content bytea,
+                failure_cause text NOT NULL DEFAULT '',
+                repair_status varchar(30) NOT NULL DEFAULT 'repaired',
+                required_parts text NOT NULL DEFAULT '',
+                performed_by uuid REFERENCES app_users(id) ON DELETE RESTRICT,
+                completed_at timestamptz,
                 created_by uuid NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
                 created_at timestamptz NOT NULL DEFAULT NOW()
             );
@@ -442,7 +460,41 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                 ADD COLUMN IF NOT EXISTS defect_id uuid
                     REFERENCES vehicle_defects(id) ON DELETE CASCADE,
                 ADD COLUMN IF NOT EXISTS purchase_request_number varchar(100)
-                    NOT NULL DEFAULT '';
+                    NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS purchase_request_date date,
+                ADD COLUMN IF NOT EXISTS purchase_request_file_name varchar(255),
+                ADD COLUMN IF NOT EXISTS purchase_request_content_type varchar(100),
+                ADD COLUMN IF NOT EXISTS purchase_request_content bytea,
+                ADD COLUMN IF NOT EXISTS failure_cause text NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS repair_status varchar(30)
+                    NOT NULL DEFAULT 'repaired',
+                ADD COLUMN IF NOT EXISTS required_parts text NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS performed_by uuid
+                    REFERENCES app_users(id) ON DELETE RESTRICT,
+                ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+
+            UPDATE vehicle_works
+            SET failure_cause = description
+            WHERE failure_cause = '';
+
+            UPDATE vehicle_works
+            SET performed_by = created_by,
+                completed_at = created_at
+            WHERE performed_by IS NULL;
+
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'ck_vehicle_works_repair_status'
+                ) THEN
+                    ALTER TABLE vehicle_works
+                    ADD CONSTRAINT ck_vehicle_works_repair_status
+                    CHECK (repair_status IN (
+                        'repaired', 'faulty', 'awaiting_parts'));
+                END IF;
+            END
+            $$;
 
             DO $$
             BEGIN
@@ -482,8 +534,11 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
             END
             $$;
 
-            ALTER TABLE vehicle_defects
-                DROP COLUMN IF EXISTS corrective_work;
+            UPDATE vehicle_works
+            SET failure_cause = description,
+                performed_by = created_by,
+                completed_at = created_at
+            WHERE performed_by IS NULL;
 
             CREATE TABLE IF NOT EXISTS vehicle_work_photos (
                 id uuid PRIMARY KEY,
@@ -491,7 +546,9 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                     REFERENCES vehicle_works(id) ON DELETE CASCADE,
                 file_name varchar(255) NOT NULL,
                 content_type varchar(100) NOT NULL,
-                content bytea NOT NULL,
+                content bytea,
+                storage_path text,
+                size bigint NOT NULL DEFAULT 0,
                 created_at timestamptz NOT NULL DEFAULT NOW()
             );
 
@@ -501,7 +558,49 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                     REFERENCES vehicle_defects(id) ON DELETE CASCADE,
                 file_name varchar(255) NOT NULL,
                 content_type varchar(100) NOT NULL,
-                content bytea NOT NULL,
+                content bytea,
+                storage_path text,
+                size bigint NOT NULL DEFAULT 0,
+                created_at timestamptz NOT NULL DEFAULT NOW()
+            );
+
+            ALTER TABLE vehicle_work_photos
+                ALTER COLUMN content DROP NOT NULL,
+                ADD COLUMN IF NOT EXISTS storage_path text,
+                ADD COLUMN IF NOT EXISTS size bigint NOT NULL DEFAULT 0;
+            ALTER TABLE vehicle_defect_photos
+                ALTER COLUMN content DROP NOT NULL,
+                ADD COLUMN IF NOT EXISTS storage_path text,
+                ADD COLUMN IF NOT EXISTS size bigint NOT NULL DEFAULT 0;
+
+            UPDATE vehicle_work_photos
+            SET size = OCTET_LENGTH(content)
+            WHERE size = 0 AND content IS NOT NULL;
+            UPDATE vehicle_defect_photos
+            SET size = OCTET_LENGTH(content)
+            WHERE size = 0 AND content IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS vehicle_defect_videos (
+                id uuid PRIMARY KEY,
+                defect_id uuid NOT NULL
+                    REFERENCES vehicle_defects(id) ON DELETE CASCADE,
+                file_name varchar(255) NOT NULL,
+                content_type varchar(100) NOT NULL,
+                content bytea,
+                storage_path text NOT NULL,
+                size bigint NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS vehicle_work_videos (
+                id uuid PRIMARY KEY,
+                work_id uuid NOT NULL
+                    REFERENCES vehicle_works(id) ON DELETE CASCADE,
+                file_name varchar(255) NOT NULL,
+                content_type varchar(100) NOT NULL,
+                content bytea,
+                storage_path text NOT NULL,
+                size bigint NOT NULL,
                 created_at timestamptz NOT NULL DEFAULT NOW()
             );
 
@@ -519,6 +618,10 @@ public sealed class DatabaseInitializer(AppDbContext db) : IDatabaseInitializer
                 ON vehicle_work_photos (work_id, created_at);
             CREATE INDEX IF NOT EXISTS ix_vehicle_defect_photos_defect
                 ON vehicle_defect_photos (defect_id, created_at);
+            CREATE INDEX IF NOT EXISTS ix_vehicle_defect_videos_defect
+                ON vehicle_defect_videos (defect_id, created_at);
+            CREATE INDEX IF NOT EXISTS ix_vehicle_work_videos_work
+                ON vehicle_work_videos (work_id, created_at);
             """,
             cancellationToken);
         var administratorProfession = await db.Professions.FirstOrDefaultAsync(

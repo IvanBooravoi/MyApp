@@ -9,6 +9,9 @@ namespace MyApp.API.Endpoints;
 public static class VehicleEndpoints
 {
     private const long MaximumHoursImportSize = 5 * 1024 * 1024;
+    private const long MaximumPhotoSize = 8 * 1024 * 1024;
+    private const long MaximumVideoSize = 100 * 1024 * 1024;
+    private const long MaximumRequestFileSize = 20 * 1024 * 1024;
 
     public static IEndpointRouteBuilder MapVehicleEndpoints(
         this IEndpointRouteBuilder endpoints)
@@ -59,9 +62,18 @@ public static class VehicleEndpoints
         group.MapPost("/defects/{defectId:guid}/photos", async (
             Guid defectId,
             IFormFile file,
+            ClaimsPrincipal principal,
             IVehicleService service,
             CancellationToken cancellationToken) =>
         {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            if (file.Length is <= 0 or > MaximumPhotoSize)
+            {
+                return InvalidFile("Фотография должна быть не более 8 МБ.");
+            }
             await using var stream = new MemoryStream();
             await file.CopyToAsync(stream, cancellationToken);
             var result = await service.AddDefectPhotosAsync(
@@ -72,11 +84,86 @@ public static class VehicleEndpoints
                         file.ContentType,
                         stream.ToArray())
                 ],
+                userId,
                 cancellationToken);
             return result.ToHttpResult(ids => Results.Created(
                 $"/api/vehicles/defect-photos/{ids[0]}",
                 new { id = ids[0] }));
         }).DisableAntiforgery();
+
+        group.MapPost("/defects/{defectId:guid}/claim", async (
+            Guid defectId,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.ClaimDefectAsync(
+                defectId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
+
+        group.MapPost("/defects/{defectId:guid}/videos", async (
+            Guid defectId,
+            IFormFile file,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            if (file.Length is <= 0 or > MaximumVideoSize)
+            {
+                return InvalidFile("Видео должно быть не более 100 МБ.");
+            }
+            await using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, cancellationToken);
+            var result = await service.AddDefectVideosAsync(
+                defectId,
+                [new(
+                    Path.GetFileName(file.FileName),
+                    file.ContentType,
+                    stream.ToArray())],
+                userId,
+                cancellationToken);
+            return result.ToHttpResult(ids => Results.Created(
+                $"/api/vehicles/defect-videos/{ids[0]}",
+                new { id = ids[0] }));
+        }).DisableAntiforgery();
+
+        group.MapGet("/defect-videos/{videoId:guid}", async (
+            Guid videoId,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            var video = await service.GetDefectVideoAsync(
+                videoId, cancellationToken);
+            return video is null
+                ? Results.NotFound()
+                : Results.File(
+                    video.Content, video.ContentType, video.FileName,
+                    enableRangeProcessing: true);
+        });
+
+        group.MapDelete("/defect-videos/{videoId:guid}", async (
+            Guid videoId,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.DeleteDefectVideoAsync(
+                videoId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
 
         group.MapGet("/defect-photos/{photoId:guid}", async (
             Guid photoId,
@@ -96,11 +183,18 @@ public static class VehicleEndpoints
 
         group.MapDelete("/defect-photos/{photoId:guid}", async (
             Guid photoId,
+            ClaimsPrincipal principal,
             IVehicleService service,
             CancellationToken cancellationToken) =>
-            await service.DeleteDefectPhotoAsync(photoId, cancellationToken)
-                ? Results.NoContent()
-                : Results.NotFound());
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.DeleteDefectPhotoAsync(
+                photoId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
 
         group.MapPost("/{vehicleId:guid}/hours", async (
             Guid vehicleId,
@@ -171,9 +265,18 @@ public static class VehicleEndpoints
         group.MapPost("/works/{workId:guid}/photos", async (
             Guid workId,
             IFormFile file,
+            ClaimsPrincipal principal,
             IVehicleService service,
             CancellationToken cancellationToken) =>
         {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            if (file.Length is <= 0 or > MaximumPhotoSize)
+            {
+                return InvalidFile("Фотография должна быть не более 8 МБ.");
+            }
             await using var stream = new MemoryStream();
             await file.CopyToAsync(stream, cancellationToken);
             var result = await service.AddWorkPhotosAsync(
@@ -184,6 +287,7 @@ public static class VehicleEndpoints
                         file.ContentType,
                         stream.ToArray())
                 ],
+                userId,
                 cancellationToken);
             return result.ToHttpResult(ids => Results.Created(
                 $"/api/vehicles/work-photos/{ids[0]}",
@@ -208,18 +312,145 @@ public static class VehicleEndpoints
 
         group.MapDelete("/work-photos/{photoId:guid}", async (
             Guid photoId,
+            ClaimsPrincipal principal,
             IVehicleService service,
             CancellationToken cancellationToken) =>
-            await service.DeleteWorkPhotoAsync(photoId, cancellationToken)
-                ? Results.NoContent()
-                : Results.NotFound());
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.DeleteWorkPhotoAsync(
+                photoId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
+
+        group.MapPost("/works/{workId:guid}/videos", async (
+            Guid workId,
+            IFormFile file,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            if (file.Length is <= 0 or > MaximumVideoSize)
+            {
+                return InvalidFile("Видео должно быть не более 100 МБ.");
+            }
+            await using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, cancellationToken);
+            var result = await service.AddWorkVideosAsync(
+                workId,
+                [new(
+                    Path.GetFileName(file.FileName),
+                    file.ContentType,
+                    stream.ToArray())],
+                userId,
+                cancellationToken);
+            return result.ToHttpResult(ids => Results.Created(
+                $"/api/vehicles/work-videos/{ids[0]}",
+                new { id = ids[0] }));
+        }).DisableAntiforgery();
+
+        group.MapGet("/work-videos/{videoId:guid}", async (
+            Guid videoId,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            var video = await service.GetWorkVideoAsync(
+                videoId, cancellationToken);
+            return video is null
+                ? Results.NotFound()
+                : Results.File(
+                    video.Content, video.ContentType, video.FileName,
+                    enableRangeProcessing: true);
+        });
+
+        group.MapDelete("/work-videos/{videoId:guid}", async (
+            Guid videoId,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.DeleteWorkVideoAsync(
+                videoId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
+
+        group.MapPut("/works/{workId:guid}/parts-request", async (
+            Guid workId,
+            HttpRequest httpRequest,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            var form = await httpRequest.ReadFormAsync(cancellationToken);
+            if (!DateOnly.TryParse(form["requestDate"], out var requestDate))
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["requestDate"] = ["Укажите дату заявки."]
+                    });
+            }
+            var file = form.Files.GetFile("file");
+            if (file?.Length > MaximumRequestFileSize)
+            {
+                return InvalidFile("Файл заявки должен быть не более 20 МБ.");
+            }
+            byte[]? content = null;
+            if (file is { Length: > 0 })
+            {
+                await using var stream = new MemoryStream();
+                await file.CopyToAsync(stream, cancellationToken);
+                content = stream.ToArray();
+            }
+            var result = await service.UpdatePartsRequestAsync(
+                workId,
+                new(
+                    form["requestNumber"].ToString(),
+                    requestDate,
+                    file is null ? null : Path.GetFileName(file.FileName),
+                    file?.ContentType,
+                    content),
+                userId,
+                cancellationToken);
+            return result.ToHttpResult(_ => Results.NoContent());
+        }).DisableAntiforgery();
+
+        group.MapGet("/works/{workId:guid}/parts-request/file", async (
+            Guid workId,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            var file = await service.GetPartsRequestFileAsync(
+                workId, cancellationToken);
+            return file is null
+                ? Results.NotFound()
+                : Results.File(
+                    file.Content, file.ContentType, file.FileName,
+                    enableRangeProcessing: true);
+        });
 
         group.MapDelete("/{category}/{id:guid}", async (
             string category,
             Guid id,
+            ClaimsPrincipal principal,
             IVehicleService service,
             CancellationToken cancellationToken) =>
-            await service.DeleteEntryAsync(category, id, cancellationToken)
+            TryGetUserId(principal, out var userId) &&
+            await service.DeleteEntryAsync(category, id, userId, cancellationToken)
                 ? Results.NoContent()
                 : Results.NotFound());
 
@@ -247,4 +478,8 @@ public static class VehicleEndpoints
             ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
         return Guid.TryParse(value, out userId);
     }
+
+    private static IResult InvalidFile(string message) =>
+        Results.ValidationProblem(
+            new Dictionary<string, string[]> { ["file"] = [message] });
 }
