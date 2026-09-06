@@ -1,41 +1,56 @@
+using MyApp.API.Endpoints;
+using MyApp.API.Extensions;
+using MyApp.Application;
+using MyApp.Application.Security;
+using MyApp.Infrastructure;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' is required.");
+var jwtSection = builder.Configuration.GetRequiredSection("Jwt");
+var jwtOptions = new JwtOptions(
+    jwtSection.GetValue<string>("Key")
+        ?? throw new InvalidOperationException("Configuration value 'Jwt:Key' is required."),
+    jwtSection.GetValue<string>("Issuer")
+        ?? throw new InvalidOperationException("Configuration value 'Jwt:Issuer' is required."),
+    jwtSection.GetValue<string>("Audience")
+        ?? throw new InvalidOperationException("Configuration value 'Jwt:Audience' is required."));
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(
+    connectionString,
+    jwtOptions);
+builder.Services.AddJwtAuthentication(builder.Configuration);
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+await app.Services.InitializeDatabaseAsync();
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapAuthEndpoints();
+app.MapAdminUserEndpoints();
+app.MapProfessionEndpoints();
+app.MapTableViewEndpoints();
+app.MapComponentDocumentEndpoints();
+app.MapResponsibleEmployeeEndpoints();
+app.MapEmployeeSignatureEndpoints();
+app.MapCsvFileEndpoints();
+app.MapRequirementJournalEndpoints();
+app.MapMaterialGroupEndpoints();
+app.MapMaintenanceTemplateEndpoints();
+app.MapUserProfileEndpoints();
+app.MapVehicleEndpoints();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

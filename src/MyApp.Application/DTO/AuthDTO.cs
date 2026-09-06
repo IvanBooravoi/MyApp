@@ -1,5 +1,19 @@
 namespace MyApp.Application.DTO {
-    public record RegisterRequest(string UserName, string Email, string Password);
     public record LoginRequest(string UserNameOrEmail, string Password);
-    public record AuthResponse(string Token);
+    public record AuthResponse(string Token, string Role);
+    public record CreateUserRequest(
+        string FirstName,
+        string MiddleName,
+        string LastName,
+        string UserName,
+        string Password,
+        Guid ProfessionId);
+    public record UpdateUserRequest(
+        string FirstName,
+        string MiddleName,
+        string LastName,
+        string UserName,
+        string? Password,
+        Guid ProfessionId,
+        string Role);
 }
