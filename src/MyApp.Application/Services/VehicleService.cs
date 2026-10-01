@@ -479,6 +479,20 @@ public sealed class VehicleService(
         CancellationToken cancellationToken) =>
         repository.GetPartsRequestFileAsync(workId, cancellationToken);
 
+    public async Task<ServiceResult<bool>> DeletePartsRequestAsync(
+        Guid workId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasProfessionAsync(userId, ["Старший механик"], cancellationToken))
+        {
+            return ServiceResult<bool>.Unauthorized();
+        }
+        return await repository.DeletePartsRequestAsync(workId, cancellationToken)
+            ? ServiceResult<bool>.Success(true)
+            : ServiceResult<bool>.NotFound();
+    }
+
     private async Task<ServiceResult<Guid>> CreateAsync(
         Guid vehicleId,
         string? validationMessage,

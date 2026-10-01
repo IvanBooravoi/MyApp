@@ -127,6 +127,7 @@ public interface IVehicleRepository
         Guid workId,
         VehiclePartsRequest request,
         CancellationToken cancellationToken);
+    Task<bool> DeletePartsRequestAsync(Guid workId, CancellationToken cancellationToken);
     Task<VehicleRequestFileContent?> GetPartsRequestFileAsync(
         Guid workId,
         CancellationToken cancellationToken);

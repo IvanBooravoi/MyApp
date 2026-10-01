@@ -429,6 +429,21 @@ public static class VehicleEndpoints
             return result.ToHttpResult(_ => Results.NoContent());
         }).DisableAntiforgery();
 
+        group.MapDelete("/works/{workId:guid}/parts-request", async (
+            Guid workId,
+            ClaimsPrincipal principal,
+            IVehicleService service,
+            CancellationToken cancellationToken) =>
+        {
+            if (!TryGetUserId(principal, out var userId))
+            {
+                return Results.Unauthorized();
+            }
+            return (await service.DeletePartsRequestAsync(
+                workId, userId, cancellationToken))
+                .ToHttpResult(_ => Results.NoContent());
+        });
+
         group.MapGet("/works/{workId:guid}/parts-request/file", async (
             Guid workId,
             IVehicleService service,

@@ -97,6 +97,8 @@ public interface IVehicleService
     Task<ServiceResult<bool>> UpdatePartsRequestAsync(
         Guid workId, VehiclePartsRequest request, Guid userId,
         CancellationToken cancellationToken);
+    Task<ServiceResult<bool>> DeletePartsRequestAsync(
+        Guid workId, Guid userId, CancellationToken cancellationToken);
     Task<VehicleRequestFileContent?> GetPartsRequestFileAsync(
         Guid workId, CancellationToken cancellationToken);
 
