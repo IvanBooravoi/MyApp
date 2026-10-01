@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps({
@@ -10,8 +10,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['navigate-section'])
-const today = new Date().toISOString().slice(0, 10)
-const currentLocalDateTime = toLocalDateTimeInput(new Date())
+
 const vehicles = ref([])
 const selectedVehicleId = ref('')
 const journal = ref(null)
@@ -34,20 +33,17 @@ const mediaViewerType = ref('image')
 const hoursImportResult = ref(null)
 const partsRequestFiles = reactive({})
 const partsRequestForms = reactive({})
+const selectedWorkId = ref('')
+
+let mediaRequestId = 0
+
+const today = toLocalDateInput(new Date())
 
 const forms = reactive({
-  purchases: {
-    requestDate: today,
-    requestNumber: '',
-    itemName: '',
-    quantity: 1,
-    status: 'Создана',
-    note: '',
-  },
   defects: {
     errorCode: '',
     symptoms: '',
-    downtimeStartedAt: currentLocalDateTime,
+    downtimeStartedAt: toLocalDateTimeInput(new Date()),
   },
   works: {
     defectId: '',
@@ -68,13 +64,18 @@ const vehicleOptions = computed(() =>
       : []),
   ]),
 )
-const activeTab = computed(() => props.section === 'works' ? 'works' : 'defects')
+const activeTab = computed(() => {
+  if (props.section === 'works') return 'works'
+  if (props.section === 'defects') return 'defects'
+  return null
+})
 const currentEntries = computed(() => {
   if (props.section === 'requests') {
     return journal.value?.works?.filter(
       (work) => work.status === 'awaiting_parts',
     ) ?? []
   }
+  if (!activeTab.value) return []
   return journal.value?.[activeTab.value] ?? []
 })
 const sectionTitle = computed(() => ({
@@ -85,6 +86,9 @@ const sectionTitle = computed(() => ({
 }[props.section] ?? 'Техника'))
 const selectedVehicle = computed(() =>
   vehicles.value.find((vehicle) => vehicle.id === selectedVehicleId.value),
+)
+const selectedWork = computed(() =>
+  journal.value?.works?.find((work) => work.id === selectedWorkId.value) ?? null,
 )
 const latestHours = computed(() => {
   const values = journal.value?.hours ?? []
@@ -118,8 +122,19 @@ const availableDefects = computed(() =>
 
 onMounted(async () => {
   await Promise.all([loadVehicles(), loadProfile()])
+  await loadWorksOnEntry()
 })
+watch(() => props.section, loadWorksOnEntry)
 onBeforeUnmount(closePhoto)
+
+async function loadWorksOnEntry() {
+  if (props.section !== 'works' || !vehicles.value.length) return
+  if (!selectedVehicleId.value) {
+    await chooseVehicle(vehicles.value[0])
+    return
+  }
+  await loadJournal()
+}
 
 function authHeaders(json = false) {
   return {
@@ -215,7 +230,13 @@ async function loadJournal() {
     )
     if (!response.ok) throw new Error('Не удалось загрузить журнал техники.')
     journal.value = await response.json()
-    for (const work of journal.value.works) {
+    if (props.section === 'works') {
+      const works = journal.value.works ?? []
+      if (!works.some((work) => work.id === selectedWorkId.value)) {
+        selectedWorkId.value = works[0]?.id ?? ''
+      }
+    }
+    for (const work of journal.value.works ?? []) {
       partsRequestForms[work.id] ??= {
         requestNumber: work.partsRequestNumber ?? '',
         requestDate: work.partsRequestDate ?? today,
@@ -230,9 +251,10 @@ async function loadJournal() {
 }
 
 async function addEntry() {
-  if (!selectedVehicleId.value) return
+  if (!selectedVehicleId.value || !activeTab.value) return
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     const payload = { ...forms[activeTab.value] }
     if (activeTab.value === 'defects') {
@@ -263,7 +285,6 @@ async function addEntry() {
           pendingDefectVideos.value,
         )
       } catch (error) {
-        resetForm(activeTab.value)
         await loadJournal()
         throw new Error(`Дефект сохранён. ${error.message}`)
       }
@@ -278,7 +299,6 @@ async function addEntry() {
           pendingWorkVideos.value,
         )
       } catch (error) {
-        resetForm(activeTab.value)
         await loadJournal()
         throw new Error(`Работа сохранена. ${error.message}`)
       }
@@ -286,9 +306,7 @@ async function addEntry() {
     resetForm(activeTab.value)
     successMessage.value = activeTab.value === 'defects'
       ? 'Неисправность зарегистрирована.'
-      : activeTab.value === 'works'
-        ? 'Результат работы сохранён.'
-        : 'Запись добавлена.'
+      : 'Результат работы сохранён.'
     await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
@@ -327,6 +345,7 @@ async function importHours(event) {
   if (!file) return
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   hoursImportResult.value = null
   try {
     const data = new FormData()
@@ -354,37 +373,60 @@ async function importHours(event) {
 }
 
 function selectWorkPhotos(event) {
+  const description = forms.works.description
   const files = [...event.target.files]
+  event.target.value = ''
   const validation = validatePhotoFiles(files, 0)
   if (validation) {
-    event.target.value = ''
     pendingWorkPhotos.value = []
     errorMessage.value = validation
     return
   }
-
   errorMessage.value = ''
   pendingWorkPhotos.value = files
+  forms.works.description = description
 }
 
 function selectWorkVideos(event) {
+  const description = forms.works.description
   const files = [...event.target.files]
+  event.target.value = ''
   const validation = validateVideoFiles(files)
   if (validation) {
-    event.target.value = ''
     pendingWorkVideos.value = []
     errorMessage.value = validation
     return
   }
   errorMessage.value = ''
   pendingWorkVideos.value = files
+  forms.works.description = description
+}
+
+function selectWorkMedia(event) {
+  const description = forms.works.description
+  const files = [...event.target.files]
+  event.target.value = ''
+  const photos = files.filter((file) => file.type.startsWith('image/'))
+  const videos = files.filter((file) => file.type.startsWith('video/'))
+  const photoValidation = validatePhotoFiles(photos, 0)
+  const videoValidation = validateVideoFiles(videos)
+  if (photoValidation || videoValidation) {
+    pendingWorkPhotos.value = []
+    pendingWorkVideos.value = []
+    errorMessage.value = photoValidation || videoValidation
+    return
+  }
+  errorMessage.value = ''
+  pendingWorkPhotos.value = photos
+  pendingWorkVideos.value = videos
+  forms.works.description = description
 }
 
 function selectDefectPhotos(event) {
   const files = [...event.target.files]
+  event.target.value = ''
   const validation = validatePhotoFiles(files, 0)
   if (validation) {
-    event.target.value = ''
     pendingDefectPhotos.value = []
     errorMessage.value = validation
     return
@@ -395,9 +437,9 @@ function selectDefectPhotos(event) {
 
 function selectDefectVideos(event) {
   const files = [...event.target.files]
+  event.target.value = ''
   const validation = validateVideoFiles(files)
   if (validation) {
-    event.target.value = ''
     pendingDefectVideos.value = []
     errorMessage.value = validation
     return
@@ -444,6 +486,7 @@ async function addPhotosToWork(workId, event) {
   }
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     await uploadFiles('works', workId, 'photos', files)
     await loadJournal()
@@ -452,7 +495,6 @@ async function addPhotosToWork(workId, event) {
   } finally {
     isSaving.value = false
   }
-
 }
 
 async function addPhotosToDefect(defectId, event) {
@@ -467,6 +509,7 @@ async function addPhotosToDefect(defectId, event) {
   }
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     await uploadFiles('defects', defectId, 'photos', files)
     await loadJournal()
@@ -488,6 +531,7 @@ async function addVideos(category, entryId, event) {
   }
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     await uploadFiles(category, entryId, 'videos', files)
     await loadJournal()
@@ -519,14 +563,18 @@ function validateVideoFiles(files) {
 
 async function openMedia(media, route, type = 'image') {
   closePhoto()
+  const requestId = mediaRequestId
   const response = await fetch(`/api/vehicles/${route}/${media.id}`, {
     headers: authHeaders(),
   })
+  if (requestId !== mediaRequestId) return
   if (!response.ok) {
     errorMessage.value = 'Не удалось загрузить вложение.'
     return
   }
-  photoViewerUrl.value = URL.createObjectURL(await response.blob())
+  const blob = await response.blob()
+  if (requestId !== mediaRequestId) return
+  photoViewerUrl.value = URL.createObjectURL(blob)
   photoViewerName.value = media.fileName
   mediaViewerType.value = type
 }
@@ -536,6 +584,7 @@ function openPhoto(photo, category = 'work') {
 }
 
 function closePhoto() {
+  mediaRequestId++
   if (photoViewerUrl.value) URL.revokeObjectURL(photoViewerUrl.value)
   photoViewerUrl.value = ''
   photoViewerName.value = ''
@@ -577,6 +626,7 @@ async function savePartsRequest(work) {
   if (partsRequestFiles[work.id]) data.append('file', partsRequestFiles[work.id])
   isSaving.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     const response = await fetch(`/api/vehicles/works/${work.id}/parts-request`, {
       method: 'PUT',
@@ -587,7 +637,30 @@ async function savePartsRequest(work) {
       const problem = await response.json().catch(() => null)
       throw new Error(problem?.detail ?? problem?.title ?? 'Не удалось сохранить заявку.')
     }
+
     successMessage.value = 'Заявка на запчасти сохранена.'
+    await loadJournal()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function deletePartsRequest(work) {
+  if (!window.confirm('Удалить заявку на закупку?')) return
+  isSaving.value = true
+  errorMessage.value = ''
+  try {
+    const response = await fetch(`/api/vehicles/works/${work.id}/parts-request`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const problem = await response.json().catch(() => null)
+      throw new Error(problem?.detail ?? problem?.title ?? 'Не удалось удалить заявку.')
+    }
+    successMessage.value = 'Заявка на запчасти удалена.'
     await loadJournal()
   } catch (error) {
     errorMessage.value = error.message
@@ -610,19 +683,6 @@ async function downloadPartsRequest(work) {
   link.download = work.partsRequestFileName
   link.click()
   URL.revokeObjectURL(url)
-}
-
-async function deleteEntry(id) {
-  if (!window.confirm('Удалить выбранную запись?')) return
-  const response = await fetch(`/api/vehicles/${activeTab.value}/${id}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-  })
-  if (!response.ok) {
-    errorMessage.value = 'Не удалось удалить запись.'
-    return
-  }
-  await loadJournal()
 }
 
 async function deleteDefect(defect) {
@@ -660,16 +720,7 @@ function canDeleteDefect(defect) {
 }
 
 function resetForm(category) {
-  if (category === 'purchases') {
-    Object.assign(forms.purchases, {
-      requestDate: today,
-      requestNumber: '',
-      itemName: '',
-      quantity: 1,
-      status: 'Создана',
-      note: '',
-    })
-  } else if (category === 'defects') {
+  if (category === 'defects') {
     Object.assign(forms.defects, {
       errorCode: '',
       symptoms: '',
@@ -715,12 +766,18 @@ function formatDateTime(value) {
   }).format(new Date(value))
 }
 
+function toLocalDateInput(value) {
+  const offset = value.getTimezoneOffset() * 60_000
+  return new Date(value.getTime() - offset).toISOString().slice(0, 10)
+}
+
 function toLocalDateTimeInput(value) {
   const offset = value.getTimezoneOffset() * 60_000
   return new Date(value.getTime() - offset).toISOString().slice(0, 16)
 }
 
 function formatNumber(value) {
+  if (value === null || value === undefined || value === '') return '—'
   return Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 }
 
@@ -854,7 +911,7 @@ function printReport() {
           <section class="vehicle-summary">
             <article class="macos-glass-panel">
               <span>Последние моточасы</span>
-              <strong>{{ latestHours === null ? '—' : formatNumber(latestHours) }}</strong>
+              <strong>{{ formatNumber(latestHours) }}</strong>
             </article>
             <article class="macos-glass-panel">
               <span>Неисправности за период</span>
@@ -959,7 +1016,12 @@ function printReport() {
                 </label>
                 <label class="vehicle-field vehicle-field--full">
                   <span>Выполненные работы</span>
-                  <textarea v-model="forms.works.description" required rows="3"></textarea>
+                  <textarea
+                    v-model="forms.works.description"
+                    placeholder="Отчёт о выполненной работе..."
+                    required
+                    rows="3"
+                  ></textarea>
                 </label>
                 <label class="vehicle-field">
                   <span>Статус</span>
@@ -977,33 +1039,22 @@ function printReport() {
                   <textarea v-model="forms.works.requiredParts" required rows="2"></textarea>
                 </label>
                 <label class="vehicle-field vehicle-field--full">
-                  <span>Фотографии (JPEG, PNG, WebP до 8 МБ)</span>
+                  <span>Фото и видео выполненной работы</span>
                   <input
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*,video/*"
                     multiple
                     type="file"
-                    @change="selectWorkPhotos"
+                    @change="selectWorkMedia"
                   />
-                  <small v-if="pendingWorkPhotos.length">
-                    Выбрано: {{ pendingWorkPhotos.length }}
-                  </small>
-                </label>
-                <label class="vehicle-field vehicle-field--full">
-                  <span>Видео о проделанной работе (MP4, WebM, MOV до 100 МБ)</span>
-                  <input
-                    accept="video/mp4,video/webm,video/quicktime"
-                    multiple
-                    type="file"
-                    @change="selectWorkVideos"
-                  />
-                  <small v-if="pendingWorkVideos.length">
-                    Выбрано: {{ pendingWorkVideos.length }}
+                  <small v-if="pendingWorkPhotos.length || pendingWorkVideos.length">
+                    Выбрано файлов:
+                    {{ pendingWorkPhotos.length + pendingWorkVideos.length }}
                   </small>
                 </label>
               </template>
 
               <button class="primary-button vehicle-save-button" type="submit" :disabled="isSaving">
-                {{ isSaving ? 'Сохранение...' : 'Добавить запись' }}
+                {{ isSaving ? 'Сохранение...' : (section === 'works' ? 'ВЫПОЛНЕНИЕ' : 'Добавить запись') }}
               </button>
             </form>
             <p
@@ -1053,6 +1104,7 @@ function printReport() {
                             {{ photo.fileName }}
                           </button>
                           <button
+                            v-if="canDeleteDefect(item)"
                             class="vehicle-photo-delete"
                             type="button"
                             aria-label="Удалить фотографию"
@@ -1065,7 +1117,14 @@ function printReport() {
                           <button type="button" @click="openMedia(video, 'defect-videos', 'video')">
                             {{ video.fileName }}
                           </button>
-                          <button class="vehicle-photo-delete" type="button" @click="deleteMedia(video.id, 'defect-videos')">×</button>
+                          <button
+                            v-if="canDeleteDefect(item)"
+                            class="vehicle-photo-delete"
+                            type="button"
+                            @click="deleteMedia(video.id, 'defect-videos')"
+                          >
+                            ×
+                          </button>
                         </span>
                         <label v-if="canCreateDefect" class="vehicle-photo-upload">
                           + Фото
@@ -1128,7 +1187,18 @@ function printReport() {
                         <input v-model="partsRequestForms[item.id].requestNumber" placeholder="Номер заявки" />
                         <input v-model="partsRequestForms[item.id].requestDate" type="date" />
                         <input type="file" @change="partsRequestFiles[item.id] = $event.target.files[0]" />
-                        <button class="secondary-button" type="button" @click="savePartsRequest(item)">Сохранить</button>
+                        <button class="secondary-button" type="button" @click="savePartsRequest(item)">
+                          {{ item.partsRequestNumber ? 'Изменить' : 'Сохранить' }}
+                        </button>
+                        <button
+                          v-if="item.partsRequestNumber"
+                          class="secondary-button"
+                          type="button"
+                          :disabled="isSaving"
+                          @click="deletePartsRequest(item)"
+                        >
+                          Удалить
+                        </button>
                       </div>
                       <span v-else>{{ item.partsRequestNumber || '—' }}</span>
                       <button
@@ -1144,9 +1214,22 @@ function printReport() {
                 </tbody>
               </table>
               <table v-else class="vehicle-journal-table vehicle-repairs-table">
-                <thead><tr><th>Задание</th><th>Причина и работы</th><th>Статус / запчасти</th><th>Медиа</th></tr></thead>
+                <thead><tr><th>Этап ремонта</th><th>Задание</th><th>Причина и работы</th><th>Статус / запчасти</th><th>Медиа</th></tr></thead>
                 <tbody>
-                  <tr v-for="item in currentEntries" :key="item.id">
+                  <tr
+                    v-for="item in currentEntries"
+                    :key="item.id"
+                    :class="{ 'vehicle-repair-row--selected': item.id === selectedWorkId }"
+                  >
+                    <td data-label="Этап ремонта">
+                      <button
+                        class="vehicle-work-stage-button"
+                        type="button"
+                        @click="selectedWorkId = item.id"
+                      >
+                        {{ formatDateTime(item.createdAt || item.workDate) }}
+                      </button>
+                    </td>
                     <td data-label="Задание">{{ item.defectNodeName || 'Старая запись без привязки' }}</td>
                     <td data-label="Работы">
                       <strong>{{ item.cause || 'Причина не указана' }}</strong>
@@ -1165,6 +1248,7 @@ function printReport() {
                             {{ photo.fileName }}
                           </button>
                           <button
+                            v-if="isAdministrator || canExecute"
                             class="vehicle-photo-delete"
                             type="button"
                             aria-label="Удалить фотографию"
@@ -1177,13 +1261,45 @@ function printReport() {
                           <button type="button" @click="openMedia(video, 'work-videos', 'video')">
                             {{ video.fileName }}
                           </button>
-                          <button class="vehicle-photo-delete" type="button" @click="deleteMedia(video.id, 'work-videos')">×</button>
+                          <button
+                            v-if="isAdministrator || canExecute"
+                            class="vehicle-photo-delete"
+                            type="button"
+                            @click="deleteMedia(video.id, 'work-videos')"
+                          >
+                            ×
+                          </button>
                         </span>
                       </div>
                     </td>
                   </tr>
                 </tbody>
               </table>
+              <section
+                v-if="section === 'works' && selectedWork"
+                class="vehicle-work-details"
+              >
+                <h3>ФОТО И ВИДЕО РЕМОНТНЫХ РАБОТ</h3>
+                <div class="vehicle-photo-actions">
+                  <span v-if="!selectedWork.photos.length && !selectedWork.videos.length">
+                    Нет вложений
+                  </span>
+                  <span v-for="photo in selectedWork.photos" :key="photo.id" class="vehicle-photo-chip">
+                    <button type="button" @click="openPhoto(photo)">
+                      {{ photo.fileName }}
+                    </button>
+                  </span>
+                  <span v-for="video in selectedWork.videos" :key="video.id" class="vehicle-photo-chip">
+                    <button type="button" @click="openMedia(video, 'work-videos', 'video')">
+                      {{ video.fileName }}
+                    </button>
+                  </span>
+                </div>
+                <h3>ОПИСАНИЕ ВЫПОЛНЕННЫХ РАБОТ</h3>
+                <p class="vehicle-work-description">
+                  {{ selectedWork.description || 'Описание не указано.' }}
+                </p>
+              </section>
               <p v-if="!currentEntries.length" class="vehicle-empty">
                 За выбранный период записей нет
               </p>

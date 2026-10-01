@@ -725,6 +725,24 @@ public sealed class VehicleRepository(NpgsqlDataSource dataSource) : IVehicleRep
             : null;
     }
 
+    public async Task<bool> DeletePartsRequestAsync(
+        Guid workId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand(
+            """
+            UPDATE vehicle_works
+            SET purchase_request_number = NULL,
+                purchase_request_date = NULL,
+                purchase_request_file_name = NULL,
+                purchase_request_content_type = NULL,
+                purchase_request_content = NULL
+            WHERE id = @workId
+            """);
+        command.Parameters.AddWithValue("workId", workId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async Task<bool> DeleteEntryAsync(
         string category,
         Guid id,
